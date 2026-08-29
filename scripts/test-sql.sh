@@ -24,7 +24,8 @@ trap cleanup EXIT
 psql "$CONN" -q -c "create database $DB;" || exit 1
 P() { psql "$CONN dbname=$DB" -v ON_ERROR_STOP=1 -q -X -t -A "$@"; }
 
-P -c "do \$\$ begin create role anon nologin; exception when duplicate_object then null; end \$\$;" >/dev/null
+# Mirror Supabase: pgcrypto lives in `extensions`, not `public`.
+P -c "create schema if not exists extensions; do \$\$ begin create role anon nologin; exception when duplicate_object then null; end \$\$;" >/dev/null
 P -f supabase/burlington-days-SETUP.sql >/tmp/bd-setup.log 2>&1 || { echo "setup SQL failed:"; tail -12 /tmp/bd-setup.log; exit 1; }
 echo "schema loaded"
 
@@ -109,6 +110,7 @@ ck "library now has both"        "select count(*) from bd_days_public();" "2"
 ck "device hashes never surface" "select count(*) from bd_days_public() d where d::text ilike '%$TOK%';" "0"
 ck "mine is token-gated"         "select count(*) from bd_mine('$TOK');" "2"
 ck "someone else sees none"      "select count(*) from bd_mine('${TOK2}');" "0"
+ck "no unqualified pgcrypto"     "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'bd\\_%' and p.prosrc ~ '(^|[^.])\\m(digest|gen_random_bytes)\\M';" "0"
 ck "rls is on for every table"   "select count(*) from pg_tables where schemaname='public' and tablename like 'bd_%' and not rowsecurity;" "0"
 
 echo

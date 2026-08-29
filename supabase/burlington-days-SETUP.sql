@@ -6,7 +6,11 @@
 -- A run (one group's day) is opened with a slug plus the group name; the
 -- name is never stored in the clear.
 
-create extension if not exists pgcrypto;
+-- Supabase ships pgcrypto in the `extensions` schema. Everything below
+-- qualifies its calls, so this file behaves the same on a bare Postgres
+-- and on the hosted project. scripts/test-sql.sh mirrors that layout.
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
 
 -- ---------- helpers ----------
 
@@ -25,7 +29,7 @@ $$;
 
 create or replace function bd_hash(t text)
 returns text language sql immutable as $$
-  select encode(digest(coalesce(t, ''), 'sha256'), 'hex')
+  select encode(extensions.digest(coalesce(t, ''), 'sha256'), 'hex')
 $$;
 
 -- The same shape check js/core.js validateDay() makes, on the server side.
@@ -125,7 +129,7 @@ alter table bd_rate_log   enable row level security;
 -- ---------- rate limiting ----------
 
 create or replace function bd_rate_ok(p_device text, p_kind text, p_max int, p_window interval)
-returns boolean language plpgsql security definer set search_path = public as $$
+returns boolean language plpgsql security definer set search_path = public, extensions as $$
 declare n int;
 begin
   delete from bd_rate_log where at < now() - interval '2 days';
@@ -142,7 +146,7 @@ create or replace function bd_days_public()
 returns table (slug text, name text, blurb text, author_name text, btown_pick boolean,
                wants text[], mobility text, budget text, season text[], stops jsonb,
                did_count int, again_pct int)
-language sql security definer set search_path = public as $$
+language sql security definer set search_path = public, extensions as $$
   select d.slug, d.name, d.blurb, d.author_name, d.btown_pick,
          d.wants, d.mobility, d.budget, d.season, d.stops,
          d.did_count,
@@ -158,7 +162,7 @@ $$;
 -- Per-stop signal, for ranking. Counts only, never who.
 create or replace function bd_signal_public()
 returns table (ref text, ups bigint, downs bigint, bests bigint)
-language sql security definer set search_path = public as $$
+language sql security definer set search_path = public, extensions as $$
   select ref, ups, downs, bests from bd_stop_signal
    where ups + downs >= 3
 $$;
@@ -168,7 +172,7 @@ $$;
 create or replace function bd_save_run(
   p_token text, p_day_slug text, p_title text, p_date date,
   p_stops jsonb, p_group text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare v_device text; v_slug text; v_day uuid; v_id uuid;
 begin
   v_device := bd_hash(p_token);
@@ -184,7 +188,7 @@ begin
   end if;
 
   select id into v_day from bd_days where slug = p_day_slug and status = 'public';
-  v_slug := lower(encode(gen_random_bytes(6), 'hex'));
+  v_slug := lower(encode(extensions.gen_random_bytes(6), 'hex'));
   insert into bd_runs (slug, day_id, title, on_date, stops, group_hash, device_hash)
   values (v_slug, v_day, bd_trunc(p_title, 60), p_date, p_stops,
           case when bd_clean(p_group, 40) is null then null
@@ -201,7 +205,7 @@ end $$;
 -- Open someone else's day. The group name is the key; a wrong one rests
 -- the whole slug for a quarter of an hour after twenty tries.
 create or replace function bd_open_run(p_slug text, p_group text, p_token text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare r bd_runs%rowtype; v_device text; v_fails int;
 begin
   v_device := bd_hash(coalesce(p_token, p_slug));
@@ -227,7 +231,7 @@ end $$;
 
 create or replace function bd_mine(p_token text)
 returns table (slug text, title text, on_date date, rated boolean)
-language sql security definer set search_path = public as $$
+language sql security definer set search_path = public, extensions as $$
   select slug, title, on_date, rated_at is not null
   from bd_runs where device_hash = bd_hash(p_token)
   order by on_date desc limit 50
@@ -237,7 +241,7 @@ $$;
 
 create or replace function bd_rate_run(
   p_token text, p_slug text, p_votes jsonb, p_best text, p_would_again boolean)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare r bd_runs%rowtype; v_device text; v jsonb; v_ref text; v_vote int; n int := 0;
 begin
   v_device := bd_hash(p_token);
@@ -277,7 +281,7 @@ end $$;
 
 create or replace function bd_publish_run(
   p_token text, p_slug text, p_name text, p_blurb text, p_author text)
-returns jsonb language plpgsql security definer set search_path = public as $$
+returns jsonb language plpgsql security definer set search_path = public, extensions as $$
 declare r bd_runs%rowtype; v_device text; v_slug text; v_id uuid; v_parent uuid; v_wants text[]; v_mob text;
 begin
   v_device := bd_hash(p_token);
@@ -295,7 +299,7 @@ begin
 
   select wants, mobility into v_wants, v_mob from bd_days where id = r.day_id;
   v_slug := regexp_replace(lower(bd_trunc(p_name, 60)), '[^a-z0-9]+', '-', 'g')
-            || '-' || lower(encode(gen_random_bytes(3), 'hex'));
+            || '-' || lower(encode(extensions.gen_random_bytes(3), 'hex'));
   insert into bd_days (slug, name, blurb, author_name, wants, mobility, budget, stops, parent_id, device_hash)
   values (v_slug, bd_trunc(p_name, 60), bd_trunc(p_blurb, 160), bd_trunc(p_author, 40),
           coalesce(v_wants, '{}'), coalesce(v_mob, 'normal'), 'any', r.stops, r.day_id, v_device)

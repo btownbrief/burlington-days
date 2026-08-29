@@ -16,7 +16,11 @@ const MAX_CHARS = 500;
 
 const CORS = {
   'access-control-allow-origin': '*',
-  'access-control-allow-headers': 'content-type',
+  // The browser sends apikey + authorization on a Supabase call; leaving
+  // them out of the preflight makes every request from the page fail
+  // silently and fall back to keyword parsing.
+  'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info',
+  'access-control-max-age': '86400',
   'access-control-allow-methods': 'POST, OPTIONS',
 };
 
