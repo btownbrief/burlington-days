@@ -1,0 +1,438 @@
+{
+  "_comment": "The seeded library. Every ref points at a real id in the guide's things.json or restaurants.json, and scripts/check-refs.mjs proves it against the live feeds — including that each day keeps its own walking promise. Counts start at zero and are only ever raised by people actually doing a day; a Btown Brief pick says so instead of showing a number nobody earned.",
+  "days": [
+    {
+      "id": "parents-are-visiting",
+      "name": "The Parents Are Visiting",
+      "blurb": "Slow pace, good views, and nobody walks more than ten minutes.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "outdoors",
+        "indoors",
+        "sit_down_dinner",
+        "quiet"
+      ],
+      "mobility": "low",
+      "budget": "mid",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "rest:deep-city",
+          "min": 660,
+          "note": "Sit-down breakfast a block off the water."
+        },
+        {
+          "ref": "thing:waterfront-park",
+          "min": 720,
+          "note": "Benches the whole way and the lake in front of you."
+        },
+        {
+          "ref": "thing:echo-leahy-center",
+          "min": 810,
+          "note": "Indoors if it turns, and you can sit down in there."
+        },
+        {
+          "ref": "rest:hen-of-the-wood",
+          "min": 1080,
+          "note": "Book it a week out. Opens at four on Saturdays."
+        }
+      ]
+    },
+    {
+      "id": "broke-but-its-august",
+      "name": "Broke But It's August",
+      "blurb": "Free the whole way through, except for one creemee at the end.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "outdoors",
+        "free",
+        "cheap",
+        "water"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Summer"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:waterfront-park",
+          "min": 660,
+          "note": "Start here before the lot fills."
+        },
+        {
+          "ref": "thing:burlington-greenway",
+          "min": 810,
+          "note": "North along the water as far as your legs want."
+        },
+        {
+          "ref": "thing:texaco-beach",
+          "min": 930,
+          "note": "Everybody's dog is here."
+        },
+        {
+          "ref": "thing:battery-park",
+          "min": 1110,
+          "note": "Stay for the sunset. It's the whole point."
+        },
+        {
+          "ref": "rest:burlington-bay-creemee",
+          "min": 1170,
+          "note": "The one thing you pay for all day."
+        }
+      ]
+    },
+    {
+      "id": "rainy-sunday-no-car",
+      "name": "Rainy Sunday, No Car",
+      "blurb": "Eight blocks, all of it indoors, and none of it a mall.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "indoors",
+        "walkable",
+        "culture",
+        "cheap"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "rest:skinny-pancake",
+          "min": 660,
+          "note": "Start warm and dry."
+        },
+        {
+          "ref": "thing:bca-center",
+          "min": 780,
+          "note": "Free, and small enough to do properly."
+        },
+        {
+          "ref": "thing:burlington-records",
+          "min": 900,
+          "note": "An hour disappears in here."
+        },
+        {
+          "ref": "thing:frog-hollow-gallery",
+          "min": 990,
+          "note": "Vermont makers, no pressure to buy."
+        },
+        {
+          "ref": "thing:radio-bean",
+          "min": 1110,
+          "note": "Somebody is always playing something."
+        }
+      ]
+    },
+    {
+      "id": "first-date-that-works",
+      "name": "A First Date That Actually Works",
+      "blurb": "Built for talking. Nothing here is so loud you have to lean in and shout.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "quiet",
+        "drinks",
+        "sit_down_dinner",
+        "walkable"
+      ],
+      "mobility": "normal",
+      "budget": "mid",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:frog-hollow-gallery",
+          "min": 1020,
+          "note": "Something to talk about in the first ten minutes."
+        },
+        {
+          "ref": "thing:foam-brewers",
+          "min": 1080,
+          "note": "One drink, outside if the patio's open."
+        },
+        {
+          "ref": "rest:pizzeria-verita",
+          "min": 1170,
+          "note": "Loud enough to be easy, quiet enough to hear."
+        }
+      ]
+    },
+    {
+      "id": "new-in-town",
+      "name": "New In Town",
+      "blurb": "The day you give someone who just moved here and hasn't found anything yet.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "outdoors",
+        "walkable",
+        "culture",
+        "sit_down_dinner"
+      ],
+      "mobility": "normal",
+      "budget": "mid",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:burlington-farmers-market",
+          "min": 630,
+          "note": "This is where the town actually is on a Saturday."
+        },
+        {
+          "ref": "thing:church-street-marketplace",
+          "min": 750,
+          "note": "Walk the whole block once, top to bottom."
+        },
+        {
+          "ref": "thing:waterfront-park",
+          "min": 870,
+          "note": "Now you understand why people stay."
+        },
+        {
+          "ref": "thing:foam-brewers",
+          "min": 990,
+          "note": "Sit outside and eavesdrop."
+        },
+        {
+          "ref": "rest:american-flatbread",
+          "min": 1110,
+          "note": "The room everyone ends up in eventually."
+        }
+      ]
+    },
+    {
+      "id": "four-hours-before-a-flight",
+      "name": "Four Hours Before A Flight",
+      "blurb": "Tight, walkable, and it ends fifteen minutes from the airport road.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "walkable",
+        "indoors",
+        "cheap"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:church-street-marketplace",
+          "min": 660,
+          "note": "One pass, no dawdling."
+        },
+        {
+          "ref": "thing:outdoor-gear-exchange",
+          "min": 750,
+          "note": "The only souvenir worth carrying home."
+        },
+        {
+          "ref": "rest:sherpa-kitchen",
+          "min": 810,
+          "note": "Fast, good, and open at lunch."
+        }
+      ]
+    },
+    {
+      "id": "south-end-saturday",
+      "name": "South End Saturday",
+      "blurb": "Art in old factory buildings, then the breweries that moved in next door.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "culture",
+        "drinks",
+        "walkable"
+      ],
+      "mobility": "normal",
+      "budget": "mid",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:south-end-arts-district",
+          "min": 720,
+          "note": "Start at the top of Pine and work down."
+        },
+        {
+          "ref": "thing:pine-street-shops",
+          "min": 840,
+          "note": "Half of these didn't exist five years ago."
+        },
+        {
+          "ref": "thing:zero-gravity-brewery",
+          "min": 960,
+          "note": "Sit at the bar, not a table."
+        },
+        {
+          "ref": "rest:la-reprise",
+          "min": 1080,
+          "note": "Four minutes from the brewery and open late."
+        }
+      ]
+    },
+    {
+      "id": "with-kids-under-ten",
+      "name": "With Kids, Under Ten",
+      "blurb": "Somewhere to run, somewhere to hide from the weather, and food before the meltdown.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "kids",
+        "outdoors",
+        "indoors",
+        "cheap"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:waterfront-park",
+          "min": 600,
+          "note": "Burn the first two hours here."
+        },
+        {
+          "ref": "thing:echo-leahy-center",
+          "min": 720,
+          "note": "The indoor half of the day, whatever the sky says."
+        },
+        {
+          "ref": "rest:skinny-pancake",
+          "min": 840,
+          "note": "Crepes, and nobody minds the noise."
+        }
+      ]
+    },
+    {
+      "id": "a-weird-burlington-day",
+      "name": "A Weird Burlington Day",
+      "blurb": "For when you've lived here six years and keep doing the same three things. You'll want a car.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "culture",
+        "walkable",
+        "cheap"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:ethan-allen-homestead",
+          "min": 660,
+          "note": "Nobody who lives here has been. Go anyway."
+        },
+        {
+          "ref": "thing:autumn-records",
+          "min": 840,
+          "note": "Winooski, ten minutes, worth the bridge."
+        },
+        {
+          "ref": "thing:barge-canal-market",
+          "min": 960,
+          "note": "Furniture you don't need and will think about all week."
+        },
+        {
+          "ref": "thing:vermont-comedy-club",
+          "min": 1140,
+          "note": "Cheap seats, and the late show is the better one."
+        }
+      ],
+      "travel": "car"
+    },
+    {
+      "id": "cheap-date-night",
+      "name": "Cheap Date Night",
+      "blurb": "Under forty dollars for two, and it doesn't feel like it.",
+      "author": "Btown Brief",
+      "btownBriefPick": true,
+      "wants": [
+        "cheap",
+        "quiet",
+        "drinks",
+        "walkable"
+      ],
+      "mobility": "normal",
+      "budget": "low",
+      "season": [
+        "Year-Round"
+      ],
+      "stats": {
+        "did": 0,
+        "wouldAgain": null
+      },
+      "stops": [
+        {
+          "ref": "thing:battery-park",
+          "min": 1110,
+          "note": "Sunset first. It's free and it does the work."
+        },
+        {
+          "ref": "rest:sherpa-kitchen",
+          "min": 1170,
+          "note": "Momos, and the bill won't frighten anybody."
+        },
+        {
+          "ref": "thing:radio-bean",
+          "min": 1260,
+          "note": "Whatever's on is on. That's the deal."
+        }
+      ]
+    }
+  ]
+}

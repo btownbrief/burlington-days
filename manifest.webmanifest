@@ -1,0 +1,9 @@
+{
+  "name": "Burlington Days",
+  "short_name": "Btown Days",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#FBF8F2",
+  "theme_color": "#FBF8F2",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
