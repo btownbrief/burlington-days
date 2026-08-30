@@ -1,208 +1,150 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-phase="day">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Burlington Days</title>
-<meta name="description" content="Days people actually had in Burlington. Take one and we'll rebuild it for your date — checking hours, weather and what's on.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap">
-<link rel="stylesheet" href="css/app.css?v=1">
+<meta name="description" content="Open it and a Burlington day is already planned — real places, real hours, today's weather. Tap to steer it, swap any stop, send it to your people.">
+<link rel="stylesheet" href="css/app.css?v=2">
 <link rel="icon" href="icon.svg">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#FBF8F2">
+<meta name="theme-color" content="#06080A">
 </head>
 <body>
 <div class="app">
 
-<!-- 1 · the shelf -->
-<section class="view" id="v-shelf" data-active>
-  <header class="pad stack" style="padding-top:20px;gap:5px">
+<!-- THE front door: a day, already planned. -->
+<section class="view" id="v-day" data-active>
+  <header class="masthead">
     <div class="spread">
-      <div class="eyebrow">Btown Brief</div>
-      <a class="icon-btn" href="#/mine" aria-label="Days I've saved">
+      <div class="brand">Btown Brief</div>
+      <a class="icon-btn" href="#/mine" aria-label="Days I've kept">
         <svg width="19" height="19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M6 3.5h8v13l-4-3-4 3z"/></svg>
       </a>
     </div>
-    <h1 style="font-size:30px;line-height:1.1">Burlington Days</h1>
-    <p class="small muted" style="margin:0">Tell us about your day, or take one somebody already had.</p>
+    <h1 class="greeting" id="greeting">Your <em>Saturday</em>, handled.</h1>
+    <p class="ctx" id="ctx">reading the sky&hellip;</p>
   </header>
 
-  <form class="pad" id="ask-form" style="padding-top:16px;padding-bottom:20px">
-    <div class="askbar">
-      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#9AAABB" stroke-width="1.8" stroke-linecap="round" style="flex-shrink:0"><circle cx="8.8" cy="8.8" r="5.3"/><path d="M12.8 12.8 16.5 16.5"/></svg>
-      <input id="ask" name="ask" type="text" autocomplete="off" enterkeyhint="go"
-             placeholder="Loading the guide…" aria-label="Describe your day" disabled>
-      <button class="go" type="submit" aria-label="Find days">
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
-      </button>
-    </div>
+  <div class="chips whenrow" id="when-chips" aria-label="Which day"></div>
+  <div class="chips moodrow" id="mood-chips" aria-label="What kind of day"></div>
+
+  <div class="dayhead">
+    <p class="dayfrom" id="day-from"></p>
+  </div>
+
+  <div class="notices" id="day-notices"></div>
+  <div class="timeline" id="timeline" aria-live="polite"></div>
+
+  <div class="kept" id="kept" hidden>
+    <div class="label">Days people kept</div>
+    <div class="keptshelf" id="kept-shelf"></div>
+  </div>
+
+  <div class="saylink" id="say-toggle-wrap">
+    <button id="say-toggle" type="button">or say it in your own words &rarr;</button>
+  </div>
+  <form class="sayform" id="say-form" hidden>
+    <input id="say" type="text" autocomplete="off" enterkeyhint="go"
+           placeholder="my parents are in town Saturday&hellip;" aria-label="Describe your day">
+    <button class="go" type="submit" aria-label="Plan it">
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
+    </button>
   </form>
 
-  <div class="pad spread" style="padding-bottom:11px;align-items:baseline">
-    <div class="label">Days people actually had</div>
-    <div class="tiny faint" id="shelf-count"></div>
-  </div>
-  <div class="pad stack" id="shelf-list" style="gap:10px"></div>
-
-  <div class="foot spread">
-    <div class="chips" id="shelf-filters"></div>
-  </div>
-  <p class="provenance" id="shelf-status"></p>
-</section>
-
-<!-- 2 · what the ask returned -->
-<section class="view" id="v-matched">
-  <header class="row pad" style="padding-top:14px;padding-left:6px">
-    <button class="icon-btn" data-back aria-label="Back">
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4.5 7 10l5.5 5.5"/></svg>
+  <div class="actionbar">
+    <button class="btn ghost" id="shuffle" type="button">
+      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h3.2c4.3 0 6 8 10.6 8H17M17 14l-2.4-2.4M17 14l-2.4 2.4M3 14h3.2c1.5 0 2.6-.9 3.6-2M17 6h-.2c-2.3 0-3.8 2-5 4M17 6l-2.4 2.4M17 6l-2.4-2.4"/></svg>
+      Whole new day
     </button>
-  </header>
-  <div class="pad" style="padding-bottom:16px">
-    <div class="warn row" style="gap:11px;align-items:flex-start">
-      <span id="matched-ask" class="grow"></span>
-      <button class="tiny" id="matched-edit" style="border:0;background:none;color:var(--teal);font-weight:600;padding:0">Edit</button>
-    </div>
-    <p class="tiny faint" id="matched-read" style="margin:8px 2px 0"></p>
+    <button class="btn solid" id="keep" type="button">Keep this day</button>
   </div>
-  <div class="pad label" id="matched-head" style="padding-bottom:11px"></div>
-  <div class="pad stack" id="matched-list" style="gap:11px"></div>
-  <div class="foot bordered stack" style="gap:10px;background:var(--bg-subtle);margin-top:auto">
-    <p class="small muted" style="margin:0" id="matched-fallback-note"></p>
-    <button class="btn dark" id="build-new">
-      <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10 3.2l1.7 5.1 5.1 1.7-5.1 1.7-1.7 5.1-1.7-5.1L3.2 10l5.1-1.7z"/></svg>
-      Build me a new one
-    </button>
-  </div>
+
+  <p class="credit" id="credit">Every place, hour and forecast is live from <a href="https://guide.btownbrief.com" rel="noopener">the city guide</a>. Nothing here is made up — if we can't check it, we say so.</p>
 </section>
 
-<!-- 3 · showing its work -->
-<section class="view dark" id="v-building">
-  <div class="pad stack" style="padding-top:40px;gap:8px">
-    <div class="eyebrow" id="building-date"></div>
-    <h1 style="font-size:30px;line-height:1.14">Getting your day ready</h1>
-  </div>
-  <div class="pad stack" id="building-checks" style="gap:18px;padding-top:24px"></div>
-  <div class="foot" style="border-top:1px solid rgba(255,255,255,0.1)">
-    <p class="small" style="color:var(--ink-3);margin:0">Every place comes out of the Burlington guide. Where we don't know something for certain, we leave it out rather than guess.</p>
-  </div>
-</section>
-
-<!-- 4 · your day -->
-<section class="view" id="v-plan">
-  <header class="pad stack" style="padding-top:16px;gap:4px">
-    <div class="spread">
-      <div class="eyebrow" id="plan-date"></div>
-      <button class="tiny" id="plan-share" style="border:0;background:none;color:var(--teal);font-weight:600;padding:0">Share</button>
-    </div>
-    <h1 id="plan-title" style="font-size:25px;line-height:1.15"></h1>
-    <p class="tiny faint" id="plan-origin" style="margin:0"></p>
-  </header>
-  <div class="pad" id="plan-changes" style="padding-top:14px"></div>
-  <div class="pad stack" id="plan-stops" style="padding-top:4px"></div>
-  <div class="pad stack" id="plan-warnings" style="gap:8px;padding-bottom:8px"></div>
-  <div class="foot stack" style="gap:10px;margin-top:auto">
-    <form class="askbar" id="refine-form">
-      <input id="refine" type="text" autocomplete="off" enterkeyhint="send" placeholder="Change something…" aria-label="Change something about this day">
-      <button class="go" type="submit" aria-label="Apply">
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h11M11 6l4 4-4 4"/></svg>
-      </button>
-    </form>
-    <button class="btn" id="plan-save">Save &amp; send to the group</button>
-  </div>
-</section>
-
-<!-- 5 · the group-name gate -->
-<section class="view dark" id="v-gate" style="justify-content:center">
-  <div class="pad stack" style="gap:8px;padding-bottom:30px">
+<!-- the group-name gate -->
+<section class="view gatewrap pad" id="v-gate">
+  <div class="stack" style="gap:8px;padding-bottom:28px">
     <div class="eyebrow" id="gate-date"></div>
-    <h1 id="gate-title" style="font-size:34px;line-height:1.12"></h1>
-    <p class="muted" id="gate-sub" style="margin:0"></p>
+    <h1 class="gate-title" id="gate-title"></h1>
+    <p class="muted" id="gate-sub" style="margin:0">Type the group name to open it.</p>
   </div>
-  <form class="pad stack" id="gate-form" style="gap:11px">
-    <label class="label" for="gate-name" style="color:var(--ink-3)">Group name</label>
-    <input id="gate-name" class="ask" style="min-height:54px;height:54px;background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.16);color:var(--bg);font-size:17px" autocomplete="off">
-    <button class="btn" type="submit">Open the day</button>
-    <p class="small" id="gate-error" style="color:var(--coral);margin:0;min-height:20px"></p>
+  <form class="stack" id="gate-form" style="gap:11px">
+    <input id="gate-name" class="gate-input" autocomplete="off" aria-label="Group name" placeholder="the group name">
+    <button class="btn solid" type="submit" style="width:100%">Open the day</button>
+    <p class="small" id="gate-error" style="color:var(--gold);margin:0;min-height:20px"></p>
   </form>
-  <div class="pad" style="padding-top:26px">
-    <p class="small" style="color:var(--ink-3);margin:0">Ask whoever sent you the link. There's no account and no password — the group name is the key.</p>
-  </div>
+  <p class="small faint" style="margin-top:20px">Ask whoever sent you the link. No account, no password &mdash; the name is the key.</p>
 </section>
 
-<!-- 6 · during the day -->
+<!-- during the day -->
 <section class="view" id="v-live">
-  <div class="pad spread" style="padding-top:22px;padding-bottom:14px">
-    <div class="small" style="font-weight:700;color:var(--ink-2)" id="live-clock"></div>
+  <div class="pad spread" style="padding-top:24px;padding-bottom:16px">
+    <div class="small" style="font-weight:500" id="live-clock"></div>
     <a class="tiny faint" href="#/" id="live-title"></a>
   </div>
-  <div class="pad" style="padding-bottom:18px">
-    <div class="dark-panel stack" style="gap:9px" id="live-next"></div>
-  </div>
-  <div class="pad stack" id="live-rail" style="gap:11px;padding-bottom:16px"></div>
-  <div class="pad stack" style="gap:9px">
-    <div class="label">Something changed?</div>
+  <div class="livecard" id="live-next"></div>
+  <div class="pad stack" id="live-rail" style="gap:11px;padding-top:18px;padding-bottom:16px"></div>
+  <div class="pad stack" style="gap:9px" id="live-actions-wrap">
+    <div class="tiny faint" style="letter-spacing:.12em;text-transform:uppercase;font-weight:600">Something changed?</div>
     <div class="chips" id="live-actions"></div>
   </div>
-  <div class="foot bordered spread" style="margin-top:auto">
-    <span class="small muted" id="live-left"></span>
-    <button class="small" id="live-finish" style="border:0;background:none;color:var(--coral);font-weight:700;padding:0">Day's done →</button>
+  <div class="actionbar" style="align-items:center">
+    <span class="small muted grow" id="live-left"></span>
+    <button class="btn ghost" id="live-finish" style="flex:1.2">Day's done &rarr;</button>
   </div>
 </section>
 
-<!-- 7 · afterward -->
+<!-- afterward -->
 <section class="view" id="v-rate">
-  <header class="pad stack" style="padding-top:24px;gap:6px">
-    <h1 id="rate-head" style="font-size:27px;line-height:1.15">How was it?</h1>
+  <header class="pad stack" style="padding-top:26px;gap:6px">
+    <h1 style="font-size:2rem" id="rate-head">How was it?</h1>
     <p class="small muted" style="margin:0">Two taps. It's what makes the next person's day better.</p>
   </header>
-  <div class="pad stack" id="rate-list" style="gap:8px;padding-top:16px"></div>
-  <div class="pad stack" style="gap:10px;padding-top:20px">
-    <div class="label">Best part of the day?</div>
+  <div class="stack" id="rate-list" style="padding-top:16px"></div>
+  <div class="pad stack" style="gap:10px;padding-top:12px">
+    <div class="tiny faint" style="letter-spacing:.12em;text-transform:uppercase;font-weight:600">Best part of the day?</div>
     <div class="chips" id="rate-best"></div>
   </div>
-  <div class="foot bordered stack" style="gap:11px;background:var(--bg-subtle);margin-top:auto">
+  <div class="pad stack" style="gap:11px;padding-top:24px;margin-top:auto;padding-bottom:20px">
     <div class="stack" style="gap:4px">
-      <h3 style="font-size:19px">Put this day in the library?</h3>
-      <p class="small muted" style="margin:0">Other people can take it and rebuild it for their own date. Your name shows; nothing else does.</p>
+      <h3 style="font-size:1.35rem">Put this day in the library?</h3>
+      <p class="small muted" style="margin:0">Other people can take it and rebuild it for their own date. Your first name shows; nothing else does.</p>
     </div>
     <div class="row" style="gap:9px">
-      <button class="btn" id="rate-publish" style="flex-grow:1">Add it</button>
+      <button class="btn solid" id="rate-publish" style="flex-grow:1">Add it</button>
       <button class="btn ghost" id="rate-private" style="flex-grow:1">Keep it private</button>
     </div>
-    <p class="small" id="rate-msg" style="margin:0;min-height:18px;color:var(--teal)"></p>
+    <p class="small" id="rate-msg" style="margin:0;min-height:18px;color:var(--good)"></p>
   </div>
 </section>
 
 <!-- mine -->
 <section class="view" id="v-mine">
-  <header class="row pad" style="padding-top:14px;padding-left:6px">
+  <header class="row pad" style="padding-top:16px;padding-left:8px">
     <button class="icon-btn" data-back aria-label="Back">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4.5 7 10l5.5 5.5"/></svg>
     </button>
   </header>
-  <div class="pad stack" style="gap:6px"><h1 style="font-size:27px">Your days</h1></div>
+  <div class="pad stack" style="gap:6px"><h1 style="font-size:2rem">Your days</h1></div>
   <div class="pad stack" id="mine-list" style="gap:10px;padding-top:16px"></div>
 </section>
 
-
-<!-- a sheet, in place of browser prompts: those block the page and look
-     wrong on a phone -->
-<div class="sheet hide" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-  <form id="sheet-form" class="stack" style="gap:12px">
-    <div class="stack" style="gap:4px">
-      <h3 id="sheet-title" style="font-size:19px"></h3>
-      <p class="small muted" id="sheet-sub" style="margin:0"></p>
-    </div>
-    <div class="stack" id="sheet-fields" style="gap:10px"></div>
-    <div class="row" style="gap:9px">
-      <button class="btn" type="submit" id="sheet-ok" style="flex-grow:1"></button>
+<!-- one sheet for anything that needs words -->
+<div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <form id="sheet-form">
+    <h3 id="sheet-title"></h3>
+    <p class="sub" id="sheet-sub"></p>
+    <div id="sheet-fields"></div>
+    <div class="btns">
+      <button class="btn solid" type="submit" id="sheet-ok" style="flex-grow:1.4"></button>
       <button class="btn ghost" type="button" id="sheet-cancel" style="flex-grow:1">Cancel</button>
     </div>
   </form>
 </div>
+
 </div>
-<script type="module" src="js/app.js?v=1"></script>
+<script type="module" src="js/app.js?v=2"></script>
 </body>
 </html>

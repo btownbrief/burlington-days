@@ -591,7 +591,7 @@ const SLOT_GROUPS = {
   activity: ['Outdoors', 'Culture', 'Do & Play', 'Live & Events', 'Shopping'],
 };
 
-export function buildDay(constraints, world, { dateISO } = {}) {
+export function buildDay(constraints, world, { dateISO, scoreNoise = null } = {}) {
   const c = normaliseConstraints(constraints);
   const date = dateISO || c.dateISO;
   const warnings = [], stops = [];
@@ -610,7 +610,7 @@ export function buildDay(constraints, world, { dateISO } = {}) {
     const out = [];
     for (const p of world.places.values()) {
       if (!eligible(p, slot, date, w, c)) continue;
-      out.push({ place: p, score: fitScore(p, slot, c) });
+      out.push({ place: p, score: fitScore(p, slot, c) + (scoreNoise ? scoreNoise(p) : 0) });
     }
     return out.sort((a, b) => b.score - a.score);
   });
@@ -756,4 +756,70 @@ export function validateDay(day) {
   if (day?.travel != null && day.travel !== 'walk' && day.travel !== 'car') errs.push('travel');
   if (/(https?:|www\.)/i.test(`${s(day?.name)} ${s(day?.blurb)}`)) errs.push('links');
   return { ok: errs.length === 0, errs: [...new Set(errs)] };
+}
+
+/* ---------- steering a day you're already looking at ----------
+   The app opens on a finished day; these are how a reader pushes it around
+   without ever typing. Purity holds: randomness comes in as a function. */
+
+// A tiny deterministic PRNG so "shuffle" is testable. Callers seed it with
+// whatever they like (Date.now() in the app, a constant in tests).
+export function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* Swap ONE stop for a different place that passes every gate the original
+   did: open, in season, survivable weather, budget, avoid-list, and within
+   the walking cap of its neighbours. Returns the new stop or null — and null
+   means "we had nothing honest to offer", never "try a worse one". */
+export function rerollStop(stops, i, world, { dateISO, constraints, rand = () => 0, exclude = [] } = {}) {
+  const cur = stops[i];
+  if (!cur) return null;
+  const c = normaliseConstraints(constraints);
+  const date = dateISO || c.dateISO;
+  if (!date) return null;
+  const cap = WALK_CAP[c.mobility === 'low' ? 'low' : 'normal'];
+  const prev = stops[i - 1] || null, next = stops[i + 1] || null;
+  const w = weatherAt(world.weather, date, cur.min);
+  const banned = new Set([cur.ref, ...exclude, ...stops.map((s) => s.ref)]);
+  const kind = cur.place?.kind ?? (cur.ref.startsWith('rest:') ? 'rest' : 'thing');
+  const group = cur.place?.group ?? null;
+
+  const pool = [];
+  for (const p of world.places.values()) {
+    if (banned.has(p.ref) || p.closed || p.kind !== kind) continue;
+    if (group && p.group !== group && kind === 'rest') continue;   // dinner stays dinner
+    if (p.kind === 'rest' && openAt(p.hours, date, cur.min) !== true) continue;
+    if (p.hours && openAt(p.hours, date, cur.min) === false) continue;
+    if (p.outdoor && !p.indoor && !outdoorOk(w)) continue;
+    if (p.season?.length && !seasonCovers(p.season, Number(date.slice(5, 7)))) continue;
+    if (tooDear(p, c) || avoided(p, c)) continue;
+    const wPrev = prev ? walkMinutes(prev.place?.coords ?? null, p.coords) : null;
+    const wNext = next ? walkMinutes(p.coords, next.place?.coords ?? null) : null;
+    if (prev && (wPrev == null || wPrev > cap)) continue;
+    if (next && (wNext == null || wNext > cap)) continue;
+    let s = fitScore(p, { kind: kind === 'rest' ? 'dinner' : 'activity', min: cur.min }, c);
+    if (p.category && p.category === cur.place?.category) s -= 1;  // variety beats sameness on a reroll
+    pool.push({ p, s });
+  }
+  if (!pool.length) return null;
+  pool.sort((a, b) => b.s - a.s);
+  // pick among the best few, not always the single top — that's what makes
+  // a second tap feel like a real reroll rather than a stuck door
+  const top = pool.slice(0, Math.min(5, pool.length));
+  const chosen = top[Math.floor(rand() * top.length)].p;
+  return makeStop(chosen, cur.min, world, date, prev, null);
+}
+
+/* Score-jittered build: same gates, same caps, but a rand() lets "shuffle"
+   land on a different valid day each time instead of the one optimum. */
+export function shuffleDay(constraints, world, { dateISO, rand = () => 0 } = {}) {
+  const jitter = 2.5; // enough to reorder near-ties, never enough to beat a gate
+  return buildDay(constraints, world, { dateISO, scoreNoise: (p) => rand() * jitter });
 }

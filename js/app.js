@@ -1,17 +1,20 @@
-/* app.js — wiring only. Every decision about places, times and swaps is made
-   in core.js, which is pure and tested; this file moves data onto the screen
-   and never invents a fact of its own. */
+/* app.js — wiring only. The rule of the house: js/core.js picks every place;
+   this file moves data onto the screen and invents no facts.
+
+   The design rule of this rewrite: THE DAY IS ALREADY THERE. Opening the app
+   is the ask. Chips steer it, ↻ swaps one stop, shuffle deals a new day —
+   nobody has to type a word. The ten curated days aren't a shelf to read any
+   more; they're what the chips reach for first. */
 
 import * as C from './core.js';
-import { loadFeeds, loadSeedDays, statusLine } from './feeds.js';
-import { backend, askToConstraints, deviceToken, NetError, isDemo } from './net.js';
+import { loadFeedsStaged, loadSeedDays, statusLine } from './feeds.js';
+import { backend, askToConstraints, deviceToken, NetError } from './net.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 
-/* Eastern wall clock, DST-safe: ask Intl what time it is in Burlington
-   rather than doing offset arithmetic. */
+/* Eastern wall clock, DST-safe: ask Intl what time it is in Burlington. */
 function nowET(d = new Date()) {
   const f = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -21,52 +24,68 @@ function nowET(d = new Date()) {
   return { dateISO: `${p.year}-${p.month}-${p.day}`, min: Number(p.hour) * 60 + Number(p.minute) };
 }
 
-const GROUP_COLOUR = {
-  'Food & Drink': 'var(--group-food)', Outdoors: 'var(--group-outdoors)', Culture: 'var(--group-culture)',
-  'Live & Events': 'var(--group-events)', 'Do & Play': 'var(--group-play)', Shopping: 'var(--group-shopping)',
-};
-
 const ICON = {
   clock: '<circle cx="10" cy="10" r="7"/><path d="M10 7v3.4l2.4 1.5"/>',
   pin: '<path d="M10 17s6-4.5 6-9a6 6 0 0 0-12 0c0 4.5 6 9 6 9z"/><circle cx="10" cy="8" r="2"/>',
-  rain: '<path d="M6 12.5a3.2 3.2 0 0 1 .6-6.4 4.2 4.2 0 0 1 8 1.1 2.8 2.8 0 0 1-.2 5.3z"/><path d="M8 15.5v2M12 15.5v2"/>',
-  swap: '<path d="M3.5 7h11l-3-3"/><path d="M16.5 13h-11l3 3"/>',
   tick: '<path d="M4 10.5l4 4 8-8"/>',
   thumb: '<path d="M7 10.5v7.5H4.5v-7.5z"/><path d="M10 18h6.1a1.8 1.8 0 0 0 1.8-1.5l.8-4.7a1.6 1.6 0 0 0-1.6-1.9h-3.4l.5-2.8a1.6 1.6 0 0 0-1.6-1.9h-.3L10 10.4V18z"/>',
+  reroll: '<path d="M15.5 8.5A6 6 0 1 0 16 11"/><path d="M16 4.5v4h-4"/>',
 };
 const svg = (path, size = 13, stroke = 1.7) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${path}</svg>`;
 
+/* ---------- moods: the whole vocabulary of the front door ----------
+   Each mood is a set of constraints and, through rankDays, a reach into the
+   library. First person, What Now voice. */
+const MOODS = [
+  { key: 'surprise', label: 'surprise me', c: { wants: ['sit_down_dinner'] } },
+  { key: 'broke', label: "I'm broke", adj: 'cheap', c: { budget: 'low', wants: ['cheap', 'free', 'sit_down_dinner'] } },
+  { key: 'parents', label: 'parents in town', adj: 'slow, good', c: { mobility: 'low', wants: ['sit_down_dinner', 'quiet'], party: 4 } },
+  { key: 'kids', label: 'kids with us', adj: 'kid-proof', c: { wants: ['kids', 'cheap', 'sit_down_dinner'] } },
+  { key: 'date', label: 'date night', adj: 'date', c: { wants: ['quiet', 'drinks', 'sit_down_dinner'], party: 2, startMin: 16 * 60, endMin: 22 * 60 } },
+  { key: 'rain', label: 'rain-proof', adj: 'dry', c: { wants: ['indoors', 'walkable', 'sit_down_dinner'] } },
+  { key: 'outside', label: 'all outside', adj: 'wide-open', c: { wants: ['outdoors', 'water', 'sit_down_dinner'] } },
+  { key: 'new', label: "I'm new here", adj: 'first', c: { wants: ['walkable', 'culture', 'sit_down_dinner'] } },
+];
+
 const S = {
   world: null, status: {}, days: [], api: null, signal: new Map(),
-  constraints: null, plan: null, source: null, run: null, ratings: new Map(), best: null,
-  askText: '', filter: null, backendReady: true,
+  date: null, mood: 'surprise', variant: 0, custom: null, customLine: null,
+  plan: null, source: null, rerolls: {},           // slotIndex -> [excluded refs]
+  run: null, ratings: new Map(), best: null,
+  backendReady: true, seedBase: Date.now() % 100000,
 };
 
-/* ---------- boot ---------- */
+/* ---------- boot: paint a day before anyone asks ---------- */
 
 async function boot() {
+  paintSky();
+  renderWhenChips();
+  renderMoodChips();
+  renderSkeleton();
+
   const seeds = await loadSeedDays();
   S.api = backend({ seedDays: seeds });
-  const { feeds, status } = await loadFeeds();
-  S.status = status;
-  S.world = C.indexWorld(feeds);
-
-  // Seeded days always show. Published ones join them when the backend is up.
   S.days = seeds.map(fromSeed);
-  try {
-    const rows = await S.api.bd_days_public();
-    if (Array.isArray(rows) && rows.length) S.days = rows.map(fromRow);
-  } catch (e) {
-    S.backendReady = !(e instanceof NetError && e.code === 'not_ready');
-  }
-  await refreshLibrary();
 
-  $('#shelf-status').textContent = statusLine(S.status) +
-    (S.backendReady ? '' : ' Saving isn\'t switched on yet, so days can\'t be shared or rated.');
-  const ask = $('#ask');
-  ask.disabled = false;
-  ask.placeholder = "Who's coming, and when?";
+  const staged = await loadFeedsStaged();
+  S.status = staged.status;
+  S.world = C.indexWorld({ ...staged.feeds, events: [] });
+  try { S.mood = localStorage.getItem('bd_mood') || 'surprise'; } catch { /* fine */ }
+  syncMoodChips();
+
+  plan();               // ← the whole point: a day, with nothing typed
+
+  // the heavy feed and the backend arrive later and only ever add
+  staged.events.then((events) => {
+    if (!Array.isArray(events?.events || events)) return;
+    S.world = C.indexWorld({ ...staged.feeds, events });
+    decorateEvents();
+    renderCredit();
+  }).catch(() => { /* the day stands without it */ });
+
+  refreshLibrary().then(() => renderKept());
+  renderCredit();
   wire();
   route();
 }
@@ -88,318 +107,367 @@ async function refreshLibrary() {
   try {
     const rows = await S.api.bd_days_public();
     if (Array.isArray(rows) && rows.length) S.days = rows.map(fromRow);
-  } catch { /* the seeded days stay on the shelf either way */ }
+  } catch (e) {
+    S.backendReady = !(e instanceof NetError && e.code === 'not_ready');
+  }
   try {
     const sig = await S.api.bd_signal_public();
     S.signal = new Map((sig ?? []).map((r) => [r.ref, r]));
   } catch { /* ranking is a bonus */ }
 }
 
-/* ---------- routing ---------- */
+/* ---------- the sky ---------- */
 
-function show(id) {
-  $$('.view').forEach((v) => v.removeAttribute('data-active'));
-  $(`#${id}`).setAttribute('data-active', '');
-  window.scrollTo(0, 0);
-}
-
-function route() {
-  const h = location.hash.replace(/^#\/?/, '');
-  const [head, arg] = h.split('/');
-  if (head === 'day' && arg) return openLibraryDay(arg);
-  if (head === 'run' && arg) return openRun(arg);
-  if (head === 'live') return renderLive(arg);
-  if (head === 'rate') return renderRate(arg);
-  if (head === 'mine') return renderMine();
-  renderShelf();
-  show('v-shelf');
-}
-
-/* ---------- 1 · the shelf ---------- */
-
-const FILTERS = [
-  { key: 'free', label: 'Free' }, { key: 'indoors', label: 'Rainy' },
-  { key: 'kids', label: 'Kids' }, { key: 'sit_down_dinner', label: 'Dinner' },
-  { key: 'quiet', label: 'Quiet' },
-];
-
-function renderShelf() {
-  const list = $('#shelf-list');
-  list.replaceChildren();
-  const days = S.filter ? S.days.filter((d) => d.wants.includes(S.filter)) : S.days;
-  $('#shelf-count').textContent = `${S.days.length} saved`;
-
-  if (!days.length) {
-    list.append(Object.assign(el('p', 'small muted'), { textContent: 'Nothing saved under that yet.' }));
-  }
-  for (const d of days.slice(0, 12)) list.append(dayCard(d));
-
-  const f = $('#shelf-filters');
-  f.replaceChildren();
-  for (const { key, label } of FILTERS) {
-    const b = el('button', 'chip sm', label);
-    b.type = 'button';
-    b.setAttribute('aria-pressed', String(S.filter === key));
-    b.onclick = () => { S.filter = S.filter === key ? null : key; renderShelf(); };
-    f.append(b);
-  }
-}
-
-function dayCard(d, extra) {
-  const card = el('button', 'card');
-  card.type = 'button';
-  const first = S.world && C.resolve(S.world, d.stops?.[0]?.ref);
-  card.style.borderTopColor = GROUP_COLOUR[first?.group] ?? 'var(--group-culture)';
-  card.append(el('h3', null, d.name));
-  if (d.blurb) card.append(Object.assign(el('p', 'small muted'), { style: 'margin:0', textContent: d.blurb }));
-  if (extra) card.append(extra);
-
-  const foot = el('div', 'card-foot');
-  if (d.pick) foot.append(el('span', 'pick', 'Btown Brief pick'));
-  else if (d.did > 0) {
-    foot.append(Object.assign(el('span', null, `${d.did} did it`), { style: 'font-weight:700;color:var(--ink)' }));
-    if (d.pct != null) { foot.append(el('span', 'dot', '·')); foot.append(el('span', 'pct', `${d.pct}% would again`)); }
+function paintSky() {
+  const { min } = nowET();
+  const sun = S.world?.weather?.sun;
+  const sunsetMin = sun?.sunset ? C.splitStamp(sun.sunset)?.min : null;
+  const h = min / 60;
+  let phase = 'day';
+  if (sunsetMin != null) {
+    const ss = sunsetMin / 60;
+    if (h < 5) phase = 'night';
+    else if (h < 7) phase = 'dawn';
+    else if (h < 11) phase = 'morning';
+    else if (h < ss - 1.3) phase = 'day';
+    else if (h < ss) phase = 'golden';
+    else if (h < ss + 1) phase = 'dusk';
+    else phase = 'night';
   } else {
-    foot.append(el('span', 'faint', 'Nobody has done this one yet'));
+    phase = h < 5 ? 'night' : h < 7 ? 'dawn' : h < 11 ? 'morning' : h < 18 ? 'day' : h < 20 ? 'dusk' : 'night';
   }
-  if (d.author && !d.pick) { foot.append(el('span', 'dot', '·')); foot.append(el('span', null, `by ${d.author}`)); }
-  card.append(foot);
-  card.onclick = () => { location.hash = `#/day/${d.slug}`; };
-  return card;
+  document.documentElement.dataset.phase = phase;
 }
 
-/* ---------- 2 · the ask ---------- */
+/* ---------- date + mood chips ---------- */
 
-async function doAsk(text) {
-  S.askText = text;
-  const today = nowET().dateISO;
-  let constraints, read;
-  try {
-    constraints = C.normaliseConstraints(await askToConstraints(text, today));
-    read = null;
-  } catch {
-    constraints = C.fallbackParse(text, { todayISO: today });
-    read = 'Read without the language model — it may have missed something. Tap Edit to correct it.';
-  }
-  if (!constraints.dateISO) constraints.dateISO = today;
-  S.constraints = constraints;
-  renderMatched(read);
-  show('v-matched');
+function dayLabel(iso, todayISO) {
+  if (iso === todayISO) return 'today';
+  if (iso === C.shiftISO(todayISO, 1)) return 'tomorrow';
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' });
+}
+function prettyDate(iso) {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
-function describe(c) {
+function renderWhenChips() {
+  const { dateISO, min } = nowET();
+  if (!S.date) S.date = min < 16 * 60 ? dateISO : C.shiftISO(dateISO, 1);
+  const wrap = $('#when-chips');
+  wrap.replaceChildren();
+  for (let i = 0; i < 5; i++) {
+    const iso = C.shiftISO(dateISO, i);
+    if (i === 0 && min >= 21 * 60) continue;          // today is over; don't offer it
+    const b = el('button', 'chip when', dayLabel(iso, dateISO));
+    b.type = 'button';
+    b.dataset.date = iso;
+    b.setAttribute('aria-pressed', String(iso === S.date));
+    b.onclick = () => { S.date = iso; S.variant = 0; S.rerolls = {}; syncWhenChips(); plan(); };
+    wrap.append(b);
+  }
+}
+const syncWhenChips = () => $$('#when-chips .chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.date === S.date)));
+
+function renderMoodChips() {
+  const wrap = $('#mood-chips');
+  wrap.replaceChildren();
+  for (const m of MOODS) {
+    const b = el('button', 'chip', m.label);
+    b.type = 'button';
+    b.dataset.mood = m.key;
+    b.setAttribute('aria-pressed', String(m.key === S.mood));
+    b.onclick = () => {
+      S.mood = m.key; S.custom = null; S.customLine = null; S.variant = 0; S.rerolls = {};
+      try { localStorage.setItem('bd_mood', m.key); } catch { /* fine */ }
+      syncMoodChips(); plan();
+    };
+    wrap.append(b);
+  }
+}
+const syncMoodChips = () => $$('#mood-chips .chip').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mood === S.mood && !S.custom)));
+
+/* ---------- planning: chips → a day on screen ---------- */
+
+function moodConstraints() {
+  if (S.custom) return C.normaliseConstraints({ ...S.custom, dateISO: S.date });
+  const m = MOODS.find((x) => x.key === S.mood) ?? MOODS[0];
+  const c = { ...m.c, wants: [...(m.c.wants ?? [])] };
+  if (m.key === 'surprise') {
+    const w = C.weatherAt(S.world?.weather, S.date, 14 * 60);
+    if (w.known) c.wants.push(C.outdoorOk(w) ? 'outdoors' : 'indoors');
+  }
+  return C.normaliseConstraints({ ...c, dateISO: S.date });
+}
+
+function plan() {
+  if (!S.world) return;
+  const c = moodConstraints();
+
+  // The library first: curated days that honestly fit this mood and date.
+  const ranked = S.custom || S.mood !== 'surprise'
+    ? C.rankDays(S.days, c, S.world, { limit: 2, floor: 3 })
+    : C.rankDays(S.days, c, S.world, { limit: 2, floor: 5 });
+
+  // Shuffle walks the options in a loop. A named mood reaches for the
+  // library first — that's the curation doing its job. Surprise deals a
+  // fresh day first, so its greeting never names an occasion nobody chose.
+  const templates = ranked.map((r) => () => fromTemplate(r.day, c));
+  const fresh = [0, 1, 2].map((k) => () => fromFresh(c, k));
+  const options = (S.mood === 'surprise' && !S.custom)
+    ? [fresh[0], fresh[1], ...templates, fresh[2]]
+    : [...templates, ...fresh];
+  let out = null;
+  for (let tries = 0; tries < options.length && !out; tries++) {
+    out = options[(S.variant + tries) % options.length]();
+    if (out && out.plan.stops.length < 3) out = null;   // a gutted day is not a day
+  }
+  if (!out) out = fromFresh(c, S.variant);              // last resort, even if thin
+
+  S.plan = out.plan;
+  S.source = out.source;
+  renderDay(out);
+}
+function fromTemplate(day, c) {
+  const p = C.rebuildDay(day, S.world, { dateISO: S.date, constraints: c });
+  return { plan: p, source: day };
+}
+function fromFresh(c, k) {
+  const rand = C.mulberry(S.seedBase + S.variant * 13 + k * 7);
+  const p = C.shuffleDay(c, S.world, { dateISO: S.date, rand });
+  return { plan: p, source: null };
+}
+
+/* ---------- rendering the day ---------- */
+
+function moodAdj() { return S.custom ? null : MOODS.find((m) => m.key === S.mood)?.adj ?? null; }
+
+function renderDay({ plan: p, source }) {
+  const label = dayLabel(S.date, nowET().dateISO);
+  const adj = moodAdj();
+  $('#greeting').innerHTML = source
+    ? `&ldquo;<em>${esc(source.name)}</em>&rdquo;`
+    : adj ? `A <em>${esc(adj)}</em> ${esc(label)}.` : `Your <em>${esc(label)}</em>, handled.`;
+
+  const from = $('#day-from');
+  if (source) {
+    const bits = [source.pick ? 'a Btown Brief day' : `kept by ${source.author || 'a reader'}`];
+    if (source.did > 0) bits.push(`${source.did} did it`);
+    if (source.pct != null) bits.push(`${source.pct}% would again`);
+    bits.push(`rebuilt for ${prettyDate(S.date)}`);
+    from.textContent = bits.join(' · ');
+  } else {
+    from.textContent = `built fresh for ${prettyDate(S.date)} — every place checked`;
+  }
+  if (S.customLine) from.textContent = `${S.customLine} · ${from.textContent}`;
+
+  renderCtx();
+  renderNotices(p, source);
+  renderTimeline(p);
+  $('#keep').disabled = p.stops.length < 2;
+}
+
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function renderCtx() {
+  const w = C.weatherAt(S.world?.weather, S.date, 14 * 60);
   const bits = [];
-  bits.push(new Date(`${c.dateISO}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
-  bits.push(`${C.clockLabel(c.startMin)}–${C.clockLabel(c.endMin)}`);
-  if (c.party > 1) bits.push(`${c.party} people`);
-  if (c.mobility === 'low') bits.push('short walks');
-  if (c.budget === 'low') bits.push('cheap');
-  return bits.join(' · ');
-}
-
-function renderMatched(readNote) {
-  $('#matched-ask').textContent = `“${S.askText}”`;
-  $('#matched-read').textContent = readNote ? `${describe(S.constraints)} — ${readNote}` : describe(S.constraints);
-
-  const ranked = C.rankDays(S.days, S.constraints, S.world, { limit: 3 });
-  $('#matched-head').textContent = ranked.length
-    ? (ranked.length === 1 ? 'One day close to that' : `${ranked.length === 2 ? 'Two' : 'Three'} days close to that`)
-    : 'Nothing in the library is close';
-  $('#matched-fallback-note').textContent = ranked.length
-    ? `Neither of those? We'll build one from scratch for ${new Date(`${S.constraints.dateISO}T12:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}.`
-    : 'Nobody has saved a day like that yet, so we\'ll make you one.';
-
-  const list = $('#matched-list');
-  list.replaceChildren();
-  for (const { day, matches, mismatches } of ranked) {
-    const lines = el('div', 'stack');
-    lines.style.gap = '5px';
-    for (const m of matches) lines.append(reasonLine(m, true));
-    for (const m of mismatches) lines.append(reasonLine(m, false));
-    const card = dayCard(day, lines);
-    list.append(card);
+  if (w.known) {
+    if (w.tempF != null) bits.push(`${w.tempF}° ${String(w.short || '').toLowerCase()}`.trim());
+    if (Number.isFinite(w.pop) && w.pop >= 30) bits.push(`${w.pop}% chance of rain`);
+  } else {
+    bits.push('past the forecast — weather unchecked');
   }
+  const sun = S.world?.weather?.sun;
+  if (sun?.sunset && S.date === nowET().dateISO) {
+    const m = C.splitStamp(sun.sunset);
+    if (m) bits.push(`sunset ${C.clockLabel(m.min)}`);
+  }
+  $('#ctx').textContent = bits.join(' · ');
 }
 
-function reasonLine(text, good) {
-  const row = el('div', 'row');
-  row.style.cssText = 'gap:8px;align-items:flex-start';
-  const mark = el('span');
-  mark.style.cssText = `flex-shrink:0;margin-top:2px;color:${good ? 'var(--teal)' : 'var(--coral-dark)'}`;
-  mark.innerHTML = good ? svg(ICON.tick, 14, 2) : svg('<path d="M10 5.5v6M10 14.2v.4"/>', 14, 2);
-  row.append(mark, Object.assign(el('span', 'small'), { textContent: good ? text : `But: ${text}`, style: good ? 'color:var(--ink-2)' : 'color:var(--ink-3)' }));
-  return row;
-}
-
-/* ---------- 3 · showing its work ---------- */
-
-async function showBuilding(result) {
-  const d = new Date(`${result.date}T12:00:00`);
-  $('#building-date').textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  const box = $('#building-checks');
+function renderNotices(p, source) {
+  const box = $('#day-notices');
   box.replaceChildren();
-
-  const evCount = S.world.events.length;
-  const restCount = [...S.world.places.values()].filter((p) => p.kind === 'rest').length;
-  const w = C.weatherAt(S.world.weather, result.date, 15 * 60);
-  const checks = [
-    [`${evCount.toLocaleString()} events checked`, `${result.eventsToday?.length ?? 0} on that day inside your window.`],
-    [`${restCount} kitchens checked for ${new Date(`${result.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long' })}`,
-      'Anywhere we can\'t verify for that day is left out.'],
-    [w.known ? 'Forecast read' : 'No forecast yet',
-      w.known ? `${w.pop != null ? `${w.pop}% chance of rain` : 'no rain figure'} mid-afternoon${w.tempF != null ? `, around ${w.tempF}°` : ''}.`
-              : 'That date is past the forecast, so nothing here accounts for weather.'],
-    [S.constraints?.mobility === 'low' ? 'Nothing over an eight-minute walk' : 'Walking distances checked',
-      S.constraints?.mobility === 'low' ? 'You said short walks, so that\'s a hard rule.' : 'Legs kept short between stops.'],
-  ];
-  for (const [head, sub] of checks) box.append(checkRow(head, sub));
-  show('v-building');
-  await new Promise((r) => setTimeout(r, 900));
-}
-
-function checkRow(head, sub) {
-  const row = el('div', 'check');
-  const mark = el('div', 'mark');
-  mark.innerHTML = svg(ICON.tick, 13, 2.4).replace('currentColor', '#fff');
-  const body = el('div', 'stack');
-  body.style.gap = '2px';
-  body.append(Object.assign(el('div', null, head), { style: 'font-size:15px;font-weight:600' }));
-  body.append(Object.assign(el('div', 'small', sub), { style: 'color:var(--ink-3)' }));
-  row.append(mark, body);
-  return row;
-}
-
-/* ---------- 4 · the day ---------- */
-
-async function openLibraryDay(slug) {
-  const day = S.days.find((d) => d.slug === slug);
-  if (!day) { location.hash = '#/'; return; }
-  const c = S.constraints ?? C.normaliseConstraints({ dateISO: nowET().dateISO, mobility: day.mobility, budget: day.budget, wants: day.wants });
-  if (!c.dateISO) c.dateISO = nowET().dateISO;
-  S.constraints = c;
-  S.source = day;
-  const plan = C.rebuildDay({ ...day, stops: day.stops }, S.world, { dateISO: c.dateISO, constraints: c });
-  await showBuilding(plan);
-  S.plan = plan;
-  renderPlan();
-  show('v-plan');
-}
-
-async function buildFresh() {
-  const c = S.constraints ?? C.fallbackParse('', { todayISO: nowET().dateISO });
-  S.source = null;
-  const plan = C.buildDay(c, S.world, { dateISO: c.dateISO });
-  await showBuilding(plan);
-  S.plan = plan;
-  renderPlan();
-  show('v-plan');
-}
-
-function renderPlan() {
-  const p = S.plan;
-  const d = new Date(`${p.date}T12:00:00`);
-  $('#plan-date').textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  $('#plan-title').textContent = S.source ? S.source.name : 'Your day';
-  $('#plan-origin').textContent = S.source
-    ? `From ${S.source.author || 'the library'} · rebuilt for this date`
-    : 'Built for you from the guide';
-
-  const ch = $('#plan-changes');
-  ch.replaceChildren();
   if (p.changes.length) {
-    const box = el('div', 'notice');
-    box.append(el('div', 'label', p.changes.length === 1 ? 'One thing changed' : `${p.changes.length} things changed`));
-    const lines = el('div', 'stack'); lines.style.gap = '5px';
-    for (const c of p.changes.slice(0, 4)) {
-      const t = c.type === 'swapped' ? `${c.from} → ${c.to} — ${c.why}`
-        : c.type === 'moved' ? `${c.name} moved to ${c.to} — ${c.why}`
-        : `${c.name} dropped — ${c.why}`;
-      lines.append(Object.assign(el('div', 'small'), { textContent: t, style: 'color:var(--ink-2)' }));
-    }
-    box.append(lines);
-    ch.append(box);
+    const n = el('div', 'notice');
+    const head = p.changes.length === 1 ? 'One thing changed for your date' : `${p.changes.length} things changed for your date`;
+    n.innerHTML = `<b>${head}.</b> ` + p.changes.slice(0, 3).map((c) =>
+      c.type === 'swapped' ? `${esc(c.from)} &rarr; ${esc(c.to)} (${esc(c.why)})`
+      : c.type === 'moved' ? `${esc(c.name)} moved to ${esc(c.to)} (${esc(c.why)})`
+      : `${esc(c.name)} dropped (${esc(c.why)})`).join(' · ');
+    box.append(n);
   }
-
-  const list = $('#plan-stops');
-  list.replaceChildren();
-  p.stops.forEach((s, i) => list.append(stopRow(s, i === p.stops.length - 1)));
-  if (!p.stops.length) {
-    list.append(Object.assign(el('p', 'small muted'), { textContent: 'Nothing in the guide fits that combination on that date. Try a wider window or another day.' }));
-  }
-
-  const warn = $('#plan-warnings');
-  warn.replaceChildren();
-  if (S.source?.travel === 'car') warn.append(el('div', 'warn', "This one is spread out — you'll want a car between stops."));
-  for (const w of p.warnings) warn.append(el('div', 'warn', w));
-
-  $('#plan-save').disabled = !p.stops.length || p.stops.length < 2;
+  for (const w of p.warnings.slice(0, 2)) box.append(el('div', 'warnline', w));
+  if (source?.travel === 'car') box.append(el('div', 'warnline', "This one is spread out — you'll want a car between stops."));
 }
 
-function stopRow(s, last) {
+function renderSkeleton() {
+  const t = $('#timeline');
+  t.replaceChildren();
+  for (const min of [660, 780, 930, 1080]) {
+    const row = el('div', 'stop skel');
+    const when = el('div', 'when-col');
+    when.append(el('b', null, C.clockLabel(min).replace(':00', '')));
+    when.append(el('div', 'rail'));
+    row.append(when, el('div', 'body'));
+    t.append(row);
+  }
+  $('#greeting').innerHTML = 'Reading <em>Burlington</em>&hellip;';
+}
+
+function renderTimeline(p) {
+  const t = $('#timeline');
+  t.replaceChildren();
+  if (!p.stops.length) {
+    const empty = el('div', 'warnline', 'Nothing in the guide fits that combination on that date. Try another day, or loosen the mood.');
+    empty.style.margin = '6px 0';
+    t.append(empty);
+    return;
+  }
+  p.stops.forEach((s, i) => t.append(stopRow(s, i, i === p.stops.length - 1)));
+  decorateEvents();
+}
+
+function stopRow(s, i, last) {
   const row = el('div', 'stop');
-  const when = el('div', 'when');
+  const when = el('div', 'when-col');
   when.append(el('b', null, C.clockLabel(s.min).replace(':00', '')));
   if (!last) when.append(el('div', 'rail'));
   const body = el('div', 'body');
-  const head = el('div', 'row');
-  head.style.cssText = 'gap:7px;flex-wrap:wrap';
-  head.append(el('h3', null, s.place.name));
-  if (s.swappedFrom) head.append(el('span', 'badge swap', 'Swapped'));
-  else if ((S.signal.get(s.ref)?.bests ?? 0) >= 3) head.append(el('span', 'badge', 'Best part'));
-  body.append(head);
 
-  const why = el('div', 'why');
+  const top = el('div', 'toprow');
+  top.append(el('h3', null, s.place.name));
+  if (s.swappedFrom) top.append(el('span', 'badge soft', 'swapped in'));
+  else if ((S.signal.get(s.ref)?.bests ?? 0) >= 3) top.append(el('span', 'badge', 'best part'));
+  const rr = el('button', 'reroll');
+  rr.type = 'button';
+  rr.title = 'Swap this stop';
+  rr.setAttribute('aria-label', `Swap ${s.place.name} for something else`);
+  rr.innerHTML = svg(ICON.reroll, 16, 1.8);
+  rr.onclick = () => rerollAt(i, body);
+  top.append(rr);
+  body.append(top);
+
   const bits = [];
   if (s.fact) bits.push(s.fact);
   if (s.walkFromPrev != null) bits.push(`${s.walkFromPrev} min walk`);
   const sig = S.signal.get(s.ref);
   if (sig && sig.ups >= 3) bits.push(`${sig.ups} liked it`);
-  why.innerHTML = svg(s.place.hours ? ICON.clock : ICON.pin, 12, 1.8);
-  why.append(el('span', null, bits.join(' · ') || s.place.category || ''));
-  body.append(why);
+  if (bits.length || s.place.category) {
+    const why = el('div', 'why');
+    why.innerHTML = svg(s.place.hours ? ICON.clock : ICON.pin, 12, 1.8);
+    why.append(el('span', null, bits.join(' · ') || s.place.category));
+    body.append(why);
+  }
+  const note = noteFor(s);
+  if (note) body.append(el('div', 'note', note));
+
   row.append(when, body);
   return row;
 }
 
-/* ---------- refining by talking ---------- */
+// A curated day's own voice survives the rebuild — but only for the stop it
+// was written about, never a swapped-in place.
+function noteFor(s) {
+  if (!S.source || s.swappedFrom) return null;
+  const orig = (S.source.stops || []).find((x) => x.ref === s.ref);
+  return orig?.note || null;
+}
 
-async function refine(text) {
-  if (!S.plan) return;
-  const t = text.toLowerCase();
-  const c = { ...S.constraints };
-  let touched = false;
-  if (/cheap|expensive|too much|less money|budget/.test(t)) { c.budget = 'low'; c.wants = [...new Set([...c.wants, 'cheap'])]; touched = true; }
-  if (/rain|indoors|inside/.test(t)) { c.wants = [...new Set([...c.wants, 'indoors'])]; touched = true; }
-  if (/walk less|shorter walk|can'?t walk|too far/.test(t)) { c.mobility = 'low'; touched = true; }
-  if (/quiet|talk/.test(t)) { c.wants = [...new Set([...c.wants, 'quiet'])]; touched = true; }
-  if (/no (drink|alcohol|booze)|sober|non.?alcoholic/.test(t)) { c.avoid = [...new Set([...(c.avoid ?? []), 'drinks'])]; c.wants = c.wants.filter((w) => w !== 'drinks'); touched = true; }
-  if (/later/.test(t)) { c.startMin += 60; c.endMin += 60; touched = true; }
-  if (/earlier/.test(t)) { c.startMin = Math.max(0, c.startMin - 60); c.endMin -= 60; touched = true; }
-  if (/kids?|children/.test(t)) { c.wants = [...new Set([...c.wants, 'kids'])]; touched = true; }
-
-  if (!touched) {
-    try { Object.assign(c, await askToConstraints(`${S.askText} ${text}`, nowET().dateISO)); touched = true; }
-    catch { /* fall through to the honest message below */ }
+function rerollAt(i, bodyEl) {
+  const exclude = S.rerolls[i] ?? [];
+  const next = C.rerollStop(S.plan.stops, i, S.world, {
+    dateISO: S.date, constraints: moodConstraints(),
+    rand: C.mulberry(Date.now() & 0xffff), exclude,
+  });
+  if (!next) {
+    bodyEl.animate?.([{ transform: 'translateX(0)' }, { transform: 'translateX(-5px)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }], { duration: 220 });
+    flashNotice('Nothing else fits that slot honestly — every alternative is closed, wet, or a hike away.');
+    return;
   }
-  if (!touched) { flash('#plan-warnings', "Couldn't work out what to change. Try \"cheaper\", \"indoors\", \"later\", or \"shorter walks\"."); return; }
-
-  S.constraints = C.normaliseConstraints({ ...c, dateISO: S.plan.date });
-  S.plan = S.source
-    ? C.rebuildDay(S.source, S.world, { dateISO: S.plan.date, constraints: S.constraints })
-    : C.buildDay(S.constraints, S.world, { dateISO: S.plan.date });
-  renderPlan();
+  S.rerolls[i] = [...exclude, S.plan.stops[i].ref];
+  // walking legs on both sides change with the swap
+  S.plan.stops[i] = next;
+  for (let k = 1; k < S.plan.stops.length; k++) {
+    S.plan.stops[k].walkFromPrev = C.walkMinutes(S.plan.stops[k - 1].place.coords, S.plan.stops[k].place.coords);
+  }
+  renderTimeline(S.plan);
+  const rows = $$('#timeline .stop .body');
+  rows[i]?.classList.add('swapping');
 }
 
-function flash(sel, msg) {
-  const box = $(sel);
-  const n = el('div', 'warn', msg);
+function flashNotice(msg) {
+  const box = $('#day-notices');
+  const n = el('div', 'warnline', msg);
   box.prepend(n);
-  setTimeout(() => n.remove(), 6000);
+  setTimeout(() => n.remove(), 5000);
 }
 
-/* ---------- the sheet ----------
-   Replaces window.prompt: a modal prompt blocks the page, can't be styled,
-   and on a phone it looks like the site is broken. */
+function decorateEvents() {
+  if (!S.plan || !S.world?.events?.length) return;
+  const ev = C.eventsOn(S.world, S.date, moodConstraints()).slice(0, 2);
+  $('#timeline .evline')?.remove();
+  if (!ev.length) return;
+  const line = el('div', 'warnline evline');
+  line.style.margin = '4px 0 0';
+  line.innerHTML = `<b style="color:var(--gold);font-weight:500">Also on ${esc(dayLabel(S.date, nowET().dateISO))}:</b> ` +
+    ev.map((e) => `${esc(e.title)}${e.min != null ? ` (${C.clockLabel(e.min)})` : ''}${e.free ? ' · free' : ''}`).join(' · ');
+  $('#timeline').append(line);
+}
+
+function renderCredit() {
+  $('#credit').textContent = statusLine(S.status) +
+    ' Nothing here is made up — if we can\'t check it, we say so.' +
+    (S.backendReady ? '' : ' Saving isn\'t switched on yet, so days can\'t be shared or rated.');
+}
+
+function renderKept() {
+  const kept = S.days.filter((d) => !d.pick);
+  const wrap = $('#kept');
+  if (!kept.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const shelf = $('#kept-shelf');
+  shelf.replaceChildren();
+  for (const d of kept.slice(0, 12)) {
+    const b = el('button', 'keptcard');
+    b.type = 'button';
+    b.append(el('b', null, d.name));
+    if (d.blurb) b.append(el('small', null, d.blurb));
+    const foot = [];
+    if (d.author) foot.push(`by ${d.author}`);
+    if (d.did > 0) foot.push(`${d.did} did it`);
+    if (foot.length) b.append(el('i', null, foot.join(' · ')));
+    b.onclick = () => {
+      S.custom = null; S.customLine = null; S.variant = 0; S.rerolls = {};
+      const c = moodConstraints();
+      const out = fromTemplate(d, c);
+      S.plan = out.plan; S.source = out.source;
+      renderDay(out);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    shelf.append(b);
+  }
+}
+
+/* ---------- say it in your own words (the one optional keyboard) ---------- */
+
+async function say(text) {
+  const today = nowET().dateISO;
+  let c, line;
+  try {
+    c = C.normaliseConstraints(await askToConstraints(text, today));
+    line = 'heard you';
+  } catch {
+    c = C.fallbackParse(text, { todayISO: today });
+    line = 'read without the language model — tap a chip if it missed';
+  }
+  if (c.dateISO) S.date = c.dateISO; else c.dateISO = S.date;
+  S.custom = c; S.customLine = line; S.variant = 0; S.rerolls = {};
+  renderWhenChips(); syncWhenChips(); syncMoodChips();
+  plan();
+}
+
+/* ---------- the sheet ---------- */
 
 function askSheet({ title, sub, fields, ok = 'Save' }) {
   return new Promise((resolve) => {
@@ -410,27 +478,19 @@ function askSheet({ title, sub, fields, ok = 'Save' }) {
     const wrap = $('#sheet-fields');
     wrap.replaceChildren();
     const inputs = fields.map((f) => {
-      const row = el('label', 'stack');
-      row.style.gap = '5px';
-      row.append(Object.assign(el('span', 'label'), { textContent: f.label }));
-      const i = el('input', 'ask');
-      i.style.cssText = 'min-height:50px;height:50px;font-size:15px';
-      i.value = f.value ?? '';
-      i.placeholder = f.placeholder ?? '';
-      i.maxLength = f.max ?? 60;
-      i.autocomplete = 'off';
-      i.name = f.name;
-      row.append(i);
-      wrap.append(row);
+      const lab = el('label');
+      lab.append(el('span', null, f.label));
+      const i = el('input');
+      i.value = f.value ?? ''; i.placeholder = f.placeholder ?? '';
+      i.maxLength = f.max ?? 60; i.autocomplete = 'off'; i.name = f.name;
+      lab.append(i); wrap.append(lab);
       return [f.name, i];
     });
-    box.classList.remove('hide');
+    box.hidden = false;
     inputs[0]?.[1].focus();
-
     const close = (val) => {
-      box.classList.add('hide');
-      $('#sheet-form').onsubmit = null;
-      $('#sheet-cancel').onclick = null;
+      box.hidden = true;
+      $('#sheet-form').onsubmit = null; $('#sheet-cancel').onclick = null;
       document.removeEventListener('keydown', onKey);
       resolve(val);
     };
@@ -444,31 +504,31 @@ function askSheet({ title, sub, fields, ok = 'Save' }) {
   });
 }
 
-/* ---------- saving, sharing, opening ---------- */
+/* ---------- keep / share / open ---------- */
 
-async function savePlan() {
+async function keepDay() {
   const res0 = await askSheet({
     title: 'Send it to the group',
     sub: 'Anyone you send the link to types this name to get in. Leave it blank to share with no name at all.',
     fields: [{ name: 'group', label: 'Group name', placeholder: 'davis-crew', max: 40 }],
-    ok: 'Save the day',
+    ok: 'Keep the day',
   });
   if (res0 === null) return;
-  const group = res0.group;
   const stops = S.plan.stops.map((s) => ({ ref: s.ref, min: s.min, name: s.place.name }));
+  const title = S.source?.name ?? (moodAdj() ? `A ${moodAdj()} day` : 'Our day');
   try {
     const res = await S.api.bd_save_run({
       p_token: deviceToken(), p_day_slug: S.source?.slug ?? null,
-      p_title: S.source?.name ?? 'Our day', p_date: S.plan.date, p_stops: stops, p_group: group || null,
+      p_title: title, p_date: S.date, p_stops: stops, p_group: res0.group || null,
     });
     if (res.error) throw new NetError(res.error);
-    S.run = { slug: res.slug, title: S.source?.name ?? 'Our day', date: S.plan.date, stops };
+    S.run = { slug: res.slug, title, date: S.date, stops };
     const url = `${location.origin}${location.pathname}#/run/${res.slug}`;
     if (navigator.share) { try { await navigator.share({ title: 'Our Burlington day', url }); } catch { /* dismissed */ } }
-    else { try { await navigator.clipboard.writeText(url); } catch { /* fall through */ } }
+    else { try { await navigator.clipboard.writeText(url); } catch { /* fine */ } }
     location.hash = `#/live/${res.slug}`;
   } catch (e) {
-    flash('#plan-warnings', e.code === 'not_ready'
+    flashNotice(e.code === 'not_ready'
       ? "Saving isn't switched on yet, so this day can't be shared. Everything above still holds."
       : `Couldn't save that: ${e.code ?? e.message}`);
   }
@@ -480,27 +540,24 @@ async function openRun(slug) {
     if (res.error === 'bad_group') return showGate(slug, res);
     if (res.error) throw new NetError(res.error);
     S.run = { slug, title: res.title, date: res.date, stops: res.stops };
-    if (!location.hash.startsWith(`#/rate/`)) location.hash = `#/live/${slug}`;
+    if (!location.hash.startsWith('#/rate/')) location.hash = `#/live/${slug}`;
     else renderRate();
   } catch (e) {
     if (e.code === 'bad_group') return showGate(slug, e.meta);
-    show('v-shelf');
-    flash('#shelf-list', e.code === 'not_ready' ? "Shared days aren't switched on yet." : "That link didn't work.");
+    show('v-day');
+    flashNotice(e.code === 'not_ready' ? "Shared days aren't switched on yet." : "That link didn't work.");
   }
 }
 
 function showGate(slug, meta) {
   $('#gate-title').textContent = meta?.title ?? 'Someone shared a day with you';
-  $('#gate-date').textContent = meta?.date
-    ? new Date(`${meta.date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-    : '';
-  $('#gate-sub').textContent = 'Type the group name to open it.';
+  $('#gate-date').textContent = meta?.date ? prettyDate(meta.date) : '';
   $('#gate-error').textContent = '';
   $('#gate-form').dataset.slug = slug;
   show('v-gate');
 }
 
-/* ---------- 6 · during the day ---------- */
+/* ---------- during the day ---------- */
 
 async function renderLive(slug) {
   if (slug && S.run?.slug !== slug) { await openRun(slug); return; }
@@ -513,7 +570,6 @@ async function renderLive(slug) {
   const past = dateISO > S.run.date;
   const isToday = dateISO === S.run.date;
   const future = dateISO < S.run.date;
-  // A stop counts as behind you half an hour after it started.
   const remaining = isToday ? stops.filter((s) => s.min > min - 30) : (future ? stops : []);
   const finished = remaining.length === 0;
   const next = finished ? null : remaining[0];
@@ -522,54 +578,50 @@ async function renderLive(slug) {
   const panel = $('#live-next');
   panel.replaceChildren();
   if (finished) {
-    panel.append(Object.assign(el('div', 'eyebrow'), { textContent: past ? 'That was the day' : 'That\'s the day' }));
-    panel.append(Object.assign(el('h2', null, 'All done'), { style: 'font-size:26px;line-height:1.15' }));
-    panel.append(Object.assign(el('p', null, 'Tell us which bits were worth it — two taps, and it makes the next person\'s day better.'), { style: 'margin:0;color:var(--ink-3);font-size:14px' }));
+    panel.append(el('div', 'eyebrow', past ? 'That was the day' : "That's the day"));
+    panel.append(el('h2', null, 'All done'));
+    panel.append(Object.assign(el('p', 'small muted'), { textContent: "Tell us which bits were worth it — two taps, and it makes the next person's day better.", style: 'margin:0' }));
   } else {
-    panel.append(Object.assign(el('div', 'eyebrow'), {
-      textContent: future ? `First up · ${C.clockLabel(next.min)}` : `Up next · ${C.clockLabel(next.min)}` }));
-    panel.append(Object.assign(el('h2', null, place?.name ?? next.name ?? 'Your next stop'), { style: 'font-size:26px;line-height:1.15' }));
+    panel.append(el('div', 'eyebrow', `${future ? 'First up' : 'Up next'} · ${C.clockLabel(next.min)}`));
+    panel.append(el('h2', null, place?.name ?? next.name ?? 'Your next stop'));
     const detail = [];
     if (next.walkFromPrev) detail.push(`${next.walkFromPrev} minutes on foot`);
     if (place && C.factFor(place, S.run.date, next.min)) detail.push(C.factFor(place, S.run.date, next.min));
-    panel.append(Object.assign(el('p', null, detail.join(' · ') || 'Take your time.'), { style: 'margin:0;color:var(--ink-3);font-size:14px' }));
+    panel.append(Object.assign(el('p', 'small muted'), { textContent: detail.join(' · ') || 'Take your time.', style: 'margin:0' }));
   }
 
   const rail = $('#live-rail');
   rail.replaceChildren();
-  stops.forEach((s, i) => {
+  stops.forEach((s) => {
     const done = finished || (isToday && s.min <= min - 30 && s !== next);
     const row = el('div', 'row'); row.style.gap = '11px';
-    const dot = el('div');
-    dot.style.cssText = `width:20px;height:20px;border-radius:999px;flex-shrink:0;${done ? 'background:var(--teal);display:flex;align-items:center;justify-content:center' : s === next ? 'border:2px solid var(--coral)' : 'border:2px solid var(--line)'}`;
-    if (done) dot.innerHTML = svg(ICON.tick, 12, 2.4).replace('currentColor', '#fff');
+    const dot = el('div', `raildot ${done ? 'done' : s === next ? 'next' : 'later'}`);
+    if (done) dot.innerHTML = svg(ICON.tick, 12, 2.4);
     const name = el('div', 'small', C.resolve(S.world, s.ref)?.name ?? s.name ?? s.ref);
-    name.style.color = done ? 'var(--ink-4)' : s === next ? 'var(--ink)' : 'var(--ink-2)';
-    if (s === next) name.style.fontWeight = '600';
+    name.style.color = done ? 'var(--ink-faint)' : s === next ? 'var(--ink)' : 'var(--ink-soft)';
+    if (s === next) name.style.fontWeight = '500';
     row.append(dot, name);
     rail.append(row);
   });
 
+  $('#live-actions-wrap').style.display = finished ? 'none' : '';
   const acts = $('#live-actions');
   acts.replaceChildren();
-  acts.parentElement.classList.toggle('hide', finished);
-  for (const [label, mins] of [["We're running late", 30], ['Way behind', 60]]) {
+  for (const [label, mins] of [["we're running late", 30], ['way behind', 60]]) {
     const b = el('button', 'chip', label); b.type = 'button';
     b.onclick = () => { S.run.stops = S.run.stops.map((s) => (next && s.min >= next.min ? { ...s, min: s.min + mins } : s)); renderLive(); };
     acts.append(b);
   }
-  const skip = el('button', 'chip', 'Skip this one'); skip.type = 'button';
+  const skip = el('button', 'chip', 'skip this one'); skip.type = 'button';
   skip.onclick = () => { if (next) S.run.stops = S.run.stops.filter((s) => s !== next); renderLive(); };
   acts.append(skip);
 
-  $('#live-left').textContent = finished
-    ? 'Nothing left to do'
-    : `${remaining.length} stop${remaining.length === 1 ? '' : 's'} left`;
+  $('#live-left').textContent = finished ? 'Nothing left to do' : `${remaining.length} stop${remaining.length === 1 ? '' : 's'} left`;
   $('#live-finish').textContent = finished ? 'Rate the day →' : "Day's done →";
   show('v-live');
 }
 
-/* ---------- 7 · afterward ---------- */
+/* ---------- afterward ---------- */
 
 async function renderRate(slug) {
   if (slug && S.run?.slug !== slug) { await openRun(slug); location.hash = `#/rate/${slug}`; return; }
@@ -580,7 +632,7 @@ async function renderRate(slug) {
   for (const s of S.run.stops) {
     const name = C.resolve(S.world, s.ref)?.name ?? s.name ?? s.ref;
     const row = el('div', 'rate-row');
-    row.append(Object.assign(el('div', null, name), { style: 'font-size:14.5px;font-weight:500' }));
+    row.append(Object.assign(el('div', null, name), { style: 'font-size:14.5px;font-weight:450' }));
     const pair = el('div', 'row'); pair.style.cssText = 'gap:6px;flex-shrink:0';
     for (const dir of [1, -1]) {
       const b = el('button', `thumb${dir < 0 ? ' down' : ''}`);
@@ -594,7 +646,6 @@ async function renderRate(slug) {
     row.append(pair);
     list.append(row);
   }
-
   const best = $('#rate-best');
   best.replaceChildren();
   for (const s of S.run.stops) {
@@ -629,9 +680,10 @@ async function submitRating(publish) {
     const res = await S.api.bd_publish_run({ p_token: deviceToken(), p_slug: S.run.slug, p_name: name, p_blurb: blurb, p_author: author });
     if (res.error) throw new NetError(res.error);
     await refreshLibrary();
+    renderKept();
     $('#rate-msg').textContent = 'In the library. Somebody will take it.';
   } catch (e) {
-    $('#rate-msg').style.color = 'var(--coral)';
+    $('#rate-msg').style.color = 'var(--gold)';
     $('#rate-msg').textContent = e.code === 'not_ready'
       ? "Ratings aren't switched on yet — nothing was lost, just not saved."
       : `Couldn't save that: ${e.code ?? e.message}`;
@@ -645,12 +697,12 @@ async function renderMine() {
   list.replaceChildren();
   try {
     const rows = await S.api.bd_mine({ p_token: deviceToken() });
-    if (!rows?.length) list.append(Object.assign(el('p', 'small muted'), { textContent: "You haven't saved a day yet." }));
+    if (!rows?.length) list.append(Object.assign(el('p', 'small muted'), { textContent: "You haven't kept a day yet." }));
     for (const r of rows ?? []) {
-      const b = el('button', 'card');
-      b.type = 'button';
-      b.append(el('h3', null, r.title));
-      b.append(Object.assign(el('p', 'small muted'), { style: 'margin:0', textContent: new Date(`${r.on_date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + (r.rated ? ' · rated' : '') }));
+      const b = el('button', 'keptcard');
+      b.type = 'button'; b.style.flex = 'none';
+      b.append(el('b', null, r.title));
+      b.append(el('small', null, prettyDate(r.on_date) + (r.rated ? ' · rated' : '')));
       b.onclick = () => { location.hash = `#/run/${r.slug}`; };
       list.append(b);
     }
@@ -660,23 +712,37 @@ async function renderMine() {
   show('v-mine');
 }
 
-/* ---------- wiring ---------- */
+/* ---------- routing + wiring ---------- */
+
+function show(id) {
+  $$('.view').forEach((v) => v.removeAttribute('data-active'));
+  $(`#${id}`).setAttribute('data-active', '');
+  window.scrollTo(0, 0);
+}
+
+function route() {
+  const h = location.hash.replace(/^#\/?/, '');
+  const [head, arg] = h.split('/');
+  if (head === 'run' && arg) return openRun(arg);
+  if (head === 'live') return renderLive(arg);
+  if (head === 'rate') return renderRate(arg);
+  if (head === 'mine') return renderMine();
+  show('v-day');
+}
 
 function wire() {
-  $('#ask-form').onsubmit = (e) => {
-    e.preventDefault();
-    const v = $('#ask').value.trim();
-    if (v.length < 3) return;
-    doAsk(v);
+  $('#shuffle').onclick = () => { S.variant += 1; S.rerolls = {}; plan(); };
+  $('#keep').onclick = () => keepDay();
+  $('#say-toggle').onclick = () => {
+    $('#say-form').hidden = false;
+    $('#say-toggle-wrap').hidden = true;
+    $('#say').focus();
   };
-  $('#matched-edit').onclick = () => { $('#ask').value = S.askText; show('v-shelf'); $('#ask').focus(); };
-  $('#build-new').onclick = () => buildFresh();
-  $('#refine-form').onsubmit = (e) => { e.preventDefault(); const v = $('#refine').value.trim(); if (v) { $('#refine').value = ''; refine(v); } };
-  $('#plan-save').onclick = () => savePlan();
-  $('#plan-share').onclick = () => savePlan();
-  $('#live-finish').onclick = () => { location.hash = `#/rate/${S.run?.slug ?? ''}`; };
-  $('#rate-publish').onclick = () => submitRating(true);
-  $('#rate-private').onclick = () => submitRating(false);
+  $('#say-form').onsubmit = (e) => {
+    e.preventDefault();
+    const v = $('#say').value.trim();
+    if (v.length >= 3) say(v);
+  };
   $('#gate-form').onsubmit = async (e) => {
     e.preventDefault();
     const slug = e.currentTarget.dataset.slug;
@@ -685,13 +751,17 @@ function wire() {
       if (res.error) { $('#gate-error').textContent = res.error === 'resting' ? 'Too many tries. Give it fifteen minutes.' : "That's not the name."; return; }
       S.run = { slug, title: res.title, date: res.date, stops: res.stops };
       location.hash = `#/live/${slug}`;
-    } catch (err) { $('#gate-error').textContent = "Couldn't open that."; }
+    } catch { $('#gate-error').textContent = "Couldn't open that."; }
   };
-  $$('[data-back]').forEach((b) => { b.onclick = () => history.back(); });
+  $('#live-finish').onclick = () => { location.hash = `#/rate/${S.run?.slug ?? ''}`; };
+  $('#rate-publish').onclick = () => submitRating(true);
+  $('#rate-private').onclick = () => submitRating(false);
+  $$('[data-back]').forEach((b) => { b.onclick = () => { location.hash = '#/'; }; });
   window.addEventListener('hashchange', route);
+  setInterval(paintSky, 5 * 60 * 1000);
 }
 
 boot().catch((e) => {
-  document.body.innerHTML = '<div style="padding:40px 24px;font-family:system-ui"><h1 style="font-family:Lora,Georgia,serif">Burlington Days</h1><p>Something went wrong loading the guide’s data. Try again in a moment.</p></div>';
+  document.body.innerHTML = '<div style="padding:44px 24px;font-family:Georgia,serif;color:#F2F0EA;background:#06080A;min-height:100vh"><h1>Burlington Days</h1><p style="font-family:system-ui;color:#aaa">Something went wrong loading the guide’s data. Try again in a moment.</p></div>';
   console.error(e);
 });

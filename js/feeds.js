@@ -49,6 +49,23 @@ export async function loadFeeds({ now = Date.now() } = {}) {
   return { feeds, status, ok: !!(feeds.things && feeds.restaurants) };
 }
 
+/* Staged load: the first paint should never wait on the events feed (it is
+   ~1.8MB and only decorates the day — no stop is ever picked from it). The
+   three small feeds come back right away; events arrive as a promise the
+   caller patches in when it lands. */
+export async function loadFeedsStaged({ now = Date.now() } = {}) {
+  const eventsPromise = one('events', ENDPOINTS.events, now);
+  const core = await Promise.all(
+    ['things', 'restaurants', 'weather'].map((k) => one(k, ENDPOINTS[k], now)));
+  const feeds = {}, status = {};
+  for (const r of core) { feeds[r.key] = r.data; status[r.key] = r.status; }
+  return {
+    feeds, status,
+    ok: !!(feeds.things && feeds.restaurants),
+    events: eventsPromise.then((r) => { status.events = r.status; return r.data; }),
+  };
+}
+
 /* The library: seeded days shipped with the app, plus whatever people have
    published. If the backend isn't reachable we still have the seeds — the
    shelf is never empty. */

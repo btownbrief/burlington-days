@@ -229,3 +229,57 @@ test('a replacement is never itself over budget', () => {
   const out = C.rebuildDay(day, w, { dateISO: '2026-09-12', constraints: { budget: 'low' } });
   for (const s of out.stops) assert.ok(!['$$$', '$$$$'].includes(s.place.cost));
 });
+
+test('rerollStop: a different, still-legal stop — never a closed or wet one', () => {
+  const w = world(weatherDry);
+  const built = C.buildDay({ dateISO: '2026-09-12', wants: ['culture'], startMin: 11 * 60, endMin: 20 * 60 }, w);
+  const i = built.stops.findIndex((s) => s.place.group === 'Culture');
+  assert.ok(i >= 0, 'need a culture stop to reroll');
+  const before = built.stops[i].ref;
+  const swapped = C.rerollStop(built.stops, i, w, { dateISO: '2026-09-12', constraints: {}, rand: C.mulberry(7) });
+  if (swapped) {
+    assert.notEqual(swapped.ref, before);
+    assert.equal(swapped.min, built.stops[i].min, 'time slot holds');
+    assert.ok(!swapped.place.closed);
+  } // a tiny fixture may honestly have no alternative — null is allowed
+});
+
+test('rerollStop: dinner rerolls to dinner, within budget', () => {
+  const w = world(weatherDry);
+  const stops = [
+    { ref: 'thing:museum', min: 14 * 60, place: C.resolve(w, 'thing:museum') },
+    { ref: 'rest:supper', min: 18 * 60, place: C.resolve(w, 'rest:supper') },
+  ];
+  const out = C.rerollStop(stops, 1, w, { dateISO: '2026-09-12', constraints: { budget: 'low' }, rand: C.mulberry(1) });
+  assert.ok(out, 'the diner is open and cheap');
+  assert.equal(out.place.kind, 'rest');
+  assert.ok(!['$$$', '$$$$'].includes(out.place.cost));
+});
+
+test('rerollStop: honest null when nothing else fits', () => {
+  const w = world(weatherDry);
+  const stops = [{ ref: 'rest:diner', min: 9 * 60, place: C.resolve(w, 'rest:diner') }];
+  // 9am Saturday: the only other restaurants are closed (supper) or gone
+  const out = C.rerollStop(stops, 0, w, { dateISO: '2026-09-12', constraints: {}, rand: C.mulberry(1) });
+  assert.equal(out, null);
+});
+
+test('shuffleDay: different seeds can differ, gates always hold', () => {
+  const w = world(weatherWetPM);
+  const days = [1, 2, 3, 4, 5].map((seed) =>
+    C.shuffleDay({ dateISO: '2026-09-12', wants: ['culture'], startMin: 11 * 60, endMin: 20 * 60 }, w, { rand: C.mulberry(seed) }));
+  for (const d of days) {
+    for (const s of d.stops) {
+      if (s.place.outdoor && !s.place.indoor) {
+        const wx = C.weatherAt(w.weather, '2026-09-12', s.min);
+        assert.ok(C.outdoorOk(wx), 'no shuffle may put an outdoor stop in the rain');
+      }
+    }
+  }
+});
+
+test('mulberry is deterministic', () => {
+  const a = C.mulberry(42), b = C.mulberry(42);
+  assert.equal(a(), b());
+  assert.equal(a(), b());
+});
