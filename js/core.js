@@ -426,6 +426,27 @@ export function rebuildDay(day, world, { dateISO, constraints } = {}) {
       }
     }
 
+    // 2a½. A festival, market or venue only stands if the feed lists it
+    // that day. "The Brewers Fest on a random Monday" is the exact lie this
+    // app exists to never tell.
+    if (place.group === 'Live & Events') {
+      const ev = eventConfirms(world, place, date);
+      if (!ev) {
+        const alt = pickAlternative(place, world, { date, min, c, cap, prev: stops[stops.length - 1] });
+        if (alt) {
+          changes.push({ type: 'swapped', from: place.name, to: alt.name, why: `nothing listed at ${place.name} that day` });
+          stops.push(makeStop(alt, min, world, date, stops[stops.length - 1], place.name));
+        } else {
+          changes.push({ type: 'dropped', name: place.name, why: `nothing listed there that day` });
+        }
+        continue;
+      }
+      const st = makeStop(place, min, world, date, stops[stops.length - 1], null);
+      st.fact = ev.min != null ? `On that day · ${clockLabel(ev.min)}` : 'On that day — listed in the events feed';
+      stops.push(st);
+      continue;
+    }
+
     // 2b. Priced out of the day, or a kind they asked to leave out. Without
     // this a "too expensive" or "no drinks" change would quietly do nothing.
     const why = tooDear(place, c) ? `${place.name} is dearer than you wanted`
@@ -537,7 +558,9 @@ function pickAlternative(place, world, { date, min, c, cap, prev, indoorOnly }) 
     if (place.kind === 'rest' && openAt(cand.hours, date, min) !== true) continue;
     if (indoorOnly && !cand.indoor) continue;
     if (cand.outdoor && !cand.indoor && !outdoorOk(weatherAt(world.weather, date, min))) continue;
-    if (place.group && cand.group !== place.group) continue;
+    if (cand.group === 'Live & Events' && !eventConfirms(world, cand, date)) continue;
+    if (place.group && place.group !== 'Live & Events' && cand.group !== place.group) continue;
+    if (place.group === 'Live & Events' && cand.kind !== 'thing') continue;
     if (tooDear(cand, c) || avoided(cand, c)) continue;
     const walk = walkMinutes(anchor, cand.coords);
     if (walk == null || walk > cap) continue;
@@ -588,7 +611,7 @@ export function planSlots(c) {
 const SLOT_GROUPS = {
   'food-light': ['Food & Drink'],
   dinner: ['Food & Drink'],
-  activity: ['Outdoors', 'Culture', 'Do & Play', 'Live & Events', 'Shopping'],
+  activity: ['Outdoors', 'Culture', 'Do & Play', 'Live & Events', 'Shopping'], // Live & Events only ever passes with feed confirmation — see eligible()
 };
 
 export function buildDay(constraints, world, { dateISO, scoreNoise = null } = {}) {
@@ -598,6 +621,8 @@ export function buildDay(constraints, world, { dateISO, scoreNoise = null } = {}
   if (!date) return { date: null, stops: [], changes: [], warnings: ['no date chosen'] };
 
   const cap = WALK_CAP[c.mobility === 'low' ? 'low' : 'normal'];
+  // Which festivals/markets/venues are actually ON that date, per the feed.
+  c.__confirmed = confirmedSet(world, date);
   const radius = Math.max(3, Math.ceil(cap / 2)); // every stop this close to one anchor,
   // so any two stops are within `cap` of each other by construction.
   const slots = planSlots(c);
@@ -655,6 +680,29 @@ export function buildDay(constraints, world, { dateISO, scoreNoise = null } = {}
   return { date, stops, changes: [], warnings, eventsToday: eventsOn(world, date, c).slice(0, 3), built: true };
 }
 
+/* A festival, market or venue is a date, not a place. things.json can't say
+   whether it's ON — only the events feed can. So a "Live & Events" entry is
+   schedulable exactly when that day's feed lists it, and never otherwise. */
+export function eventConfirms(world, place, dateISO) {
+  if (!place?.name) return null;
+  const needle = place.name.toLowerCase().replace(/\s*\(.*\)\s*/g, ' ').trim();
+  for (const e of (world.events || [])) {
+    const s = splitStamp(e?.start) || (e?.date === dateISO ? { date: dateISO, min: null } : null);
+    if (!s || s.date !== dateISO) continue;
+    const hay = `${e.title || ''} ${e.venue || ''}`.toLowerCase();
+    if (hay.includes(needle)) return { title: e.title, min: s.min, free: e.free === true };
+  }
+  return null;
+}
+
+function confirmedSet(world, dateISO) {
+  const set = new Set();
+  for (const p of world.places.values()) {
+    if (p.group === 'Live & Events' && eventConfirms(world, p, dateISO)) set.add(p.ref);
+  }
+  return set;
+}
+
 function eligible(p, slot, date, w, c) {
   if (p.closed) return false;
   if (slot.kind === 'dinner' && p.kind !== 'rest') return false;
@@ -664,6 +712,7 @@ function eligible(p, slot, date, w, c) {
   // that weekday never gets scheduled — 50 of the 312 rows are unverified.
   if (p.kind === 'rest' && openAt(p.hours, date, slot.min) !== true) return false;
   if (p.hours && openAt(p.hours, date, slot.min) !== true) return false;
+  if (p.group === 'Live & Events' && !(c.__confirmed?.has(p.ref))) return false;
   if (p.outdoor && !p.indoor && !outdoorOk(w)) return false;
   if (p.season?.length && !seasonCovers(p.season, Number(date.slice(5, 7)))) return false;
   if (tooDear(p, c) || avoided(p, c)) return false;
@@ -797,6 +846,7 @@ export function rerollStop(stops, i, world, { dateISO, constraints, rand = () =>
     if (group && p.group !== group && kind === 'rest') continue;   // dinner stays dinner
     if (p.kind === 'rest' && openAt(p.hours, date, cur.min) !== true) continue;
     if (p.hours && openAt(p.hours, date, cur.min) === false) continue;
+    if (p.group === 'Live & Events' && !eventConfirms(world, p, date)) continue;
     if (p.outdoor && !p.indoor && !outdoorOk(w)) continue;
     if (p.season?.length && !seasonCovers(p.season, Number(date.slice(5, 7)))) continue;
     if (tooDear(p, c) || avoided(p, c)) continue;

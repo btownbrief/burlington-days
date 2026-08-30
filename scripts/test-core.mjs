@@ -283,3 +283,55 @@ test('mulberry is deterministic', () => {
   assert.equal(a(), b());
   assert.equal(a(), b());
 });
+
+/* ---- a festival is a date, not a place ---- */
+
+const festivalThings = [...things,
+  { id: 'brew-fest', name: 'Vermont Brewers Festival', coords: [44.4799, -73.2205], indoor_outdoor: 'Outdoor',
+    cost_tier: '$$', group: 'Live & Events', category: 'Activity & Experience', season: ['Summer'],
+    time_of_day: ['Afternoon'], good_for: ["Locals' Pick"], vibe: ['Lively'], neighborhood: 'Waterfront' },
+];
+const festEvent = [{ id: 'e1', title: 'Vermont Brewers Festival', venue: 'Waterfront Park',
+  start: '2026-07-18T13:00:00-04:00', date: '2026-07-18', free: false }];
+
+test('a festival with no listing that day can never be scheduled', () => {
+  const w = C.indexWorld({ things: festivalThings, restaurants, events: festEvent, weather: weatherDry });
+  // 2026-09-12 — no listing; the festival must not appear no matter the mood
+  const out = C.buildDay({ dateISO: '2026-09-12', wants: ['outdoors', 'lively'], startMin: 11 * 60, endMin: 20 * 60 }, w);
+  assert.ok(!out.stops.some((s) => s.ref === 'thing:brew-fest'));
+});
+
+test('the same festival IS schedulable on the day the feed lists it', () => {
+  const wx = { hourly: { hours: Array.from({ length: 14 }, (_, i) => ({
+    t: `2026-07-18T${String(8 + i).padStart(2, '0')}:00:00-04:00`, temp_f: 78, wind_mph: 5, pop: 5, short: 'Sunny' })) } };
+  const w = C.indexWorld({ things: festivalThings, restaurants, events: festEvent, weather: wx });
+  assert.ok(C.eventConfirms(w, C.resolve(w, 'thing:brew-fest'), '2026-07-18'));
+  assert.equal(C.eventConfirms(w, C.resolve(w, 'thing:brew-fest'), '2026-07-19'), null);
+});
+
+test('rebuild: an unconfirmed festival is swapped out with the reason, a confirmed one keeps its listing', () => {
+  const w = C.indexWorld({ things: festivalThings, restaurants, events: festEvent, weather: weatherDry });
+  const day = { ...sampleDay, stops: [{ ref: 'thing:brew-fest', min: 13 * 60 }, { ref: 'rest:diner', min: 18 * 60 }] };
+  const off = C.rebuildDay(day, w, { dateISO: '2026-09-12', constraints: {} });
+  assert.ok(!off.stops.some((s) => s.ref === 'thing:brew-fest'));
+  assert.ok(off.changes.some((c) => /nothing listed/.test(c.why)));
+
+  const wxJuly = { hourly: { hours: Array.from({ length: 14 }, (_, i) => ({
+    t: `2026-07-18T${String(8 + i).padStart(2, '0')}:00:00-04:00`, temp_f: 78, wind_mph: 5, pop: 5, short: 'Sunny' })) } };
+  const wOn = C.indexWorld({ things: festivalThings, restaurants, events: festEvent, weather: wxJuly });
+  const on = C.rebuildDay(day, wOn, { dateISO: '2026-07-18', constraints: {} });
+  const fest = on.stops.find((s) => s.ref === 'thing:brew-fest');
+  assert.ok(fest, 'listed that day — it stays');
+  assert.match(fest.fact, /On that day/);
+});
+
+test('reroll never lands on an unlisted festival', () => {
+  const w = C.indexWorld({ things: festivalThings, restaurants, events: [], weather: weatherDry });
+  const built = C.buildDay({ dateISO: '2026-09-12', wants: ['outdoors'], startMin: 11 * 60, endMin: 20 * 60 }, w);
+  for (let i = 0; i < built.stops.length; i++) {
+    for (let seed = 1; seed <= 6; seed++) {
+      const r = C.rerollStop(built.stops, i, w, { dateISO: '2026-09-12', constraints: {}, rand: C.mulberry(seed) });
+      if (r) assert.notEqual(r.ref, 'thing:brew-fest');
+    }
+  }
+});
